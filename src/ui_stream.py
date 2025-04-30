@@ -5,10 +5,22 @@ Implements Streamlit UI with chat, emotion badges, and reset functionality.
 import time
 import streamlit as st
 import os
+import logging
 from typing import Dict, List, Any, Optional, Callable
 
-from src.journey_manager import JourneyManager
-from src.emotion_api import EmotionAPI
+from journey_manager import JourneyManager
+from emotion_api import EmotionAPI
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("emojourney.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("EmoJourney")
 
 class UIStream:
     """Streamlit UI handler with streaming capabilities."""
@@ -20,6 +32,7 @@ class UIStream:
         Args:
             journey_manager: JourneyManager instance or None to create a new one
         """
+        logger.info("Initializing UIStream")
         # Initialize session state if not already done
         if "messages" not in st.session_state:
             st.session_state.messages = []
@@ -40,15 +53,20 @@ class UIStream:
         if "suggestions" not in st.session_state:
             st.session_state.suggestions = []
         
+        if "show_goal_buttons" not in st.session_state:
+            st.session_state.show_goal_buttons = False
+            
         self.journey_manager = st.session_state.journey_manager
     
     def reset_chat(self):
         """Reset the chat and all state."""
+        logger.info("Resetting chat")
         st.session_state.messages = []
         st.session_state.current_emotion = None
         st.session_state.goal_emotion = None
         st.session_state.goal_options = []
         st.session_state.suggestions = []
+        st.session_state.show_goal_buttons = False
         self.journey_manager.reset()
         
         # Add welcome message
@@ -84,32 +102,27 @@ class UIStream:
         </div>
         """
     
-    def format_goal_option(self, option: Dict[str, Any]) -> str:
+    def select_goal(self, index: int):
         """
-        Format a goal option with emoji, name, and hops.
+        Handle goal selection.
         
         Args:
-            option: Goal option dictionary
+            index: Index of selected goal option
+        """
+        if 0 <= index < len(st.session_state.goal_options):
+            logger.info(f"User selected goal: {st.session_state.goal_options[index]['emotion']}")
+            selected_goal = st.session_state.goal_options[index]['emotion']
+            self.journey_manager.set_goal(selected_goal)
+            st.session_state.goal_emotion = selected_goal
+            st.session_state.show_goal_buttons = False
             
-        Returns:
-            Formatted HTML for the goal option
-        """
-        return f"""
-        <div style="
-            display: inline-block;
-            padding: 8px 12px;
-            margin: 8px 0;
-            background-color: {option['color']};
-            color: white;
-            border-radius: 15px;
-            font-weight: bold;
-            cursor: pointer;
-            width: 80%;
-            text-align: center;
-        ">
-            {option['emoji']} {option['emotion'].capitalize()} ({option['distance']} hops)
-        </div>
-        """
+            # Add selected goal message
+            emoji = st.session_state.goal_options[index]['emoji']
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": f"You've chosen to work towards **{selected_goal}** {emoji}. Let me help you with that.",
+                "is_emotion": False
+            })
     
     def format_suggestion(self, suggestion: Dict[str, Any]) -> str:
         """
@@ -142,6 +155,7 @@ class UIStream:
         
         # Reset button
         if st.button("Reset Chat"):
+            logger.info("User clicked Reset Chat button")
             self.reset_chat()
             st.rerun()
         
@@ -155,18 +169,33 @@ class UIStream:
                 if message.get("is_emotion", False):
                     # Render emotion badge
                     st.markdown(message["content"], unsafe_allow_html=True)
-                elif message.get("is_goal_options", False):
-                    # Render goal options
-                    st.markdown(message["content"], unsafe_allow_html=True)
-                elif message.get("is_suggestions", False):
-                    # Render suggestions
-                    st.markdown(message["content"], unsafe_allow_html=True)
                 else:
                     # Render regular message
                     st.markdown(message["content"])
         
+        # Display goal buttons if needed
+        if st.session_state.show_goal_buttons and st.session_state.goal_options:
+            with st.chat_message("assistant"):
+                st.markdown("**What emotion would you like to work towards?**")
+                
+                # Create buttons for each goal option
+                for i, option in enumerate(st.session_state.goal_options):
+                    emotion = option["emotion"]
+                    emoji = option["emoji"]
+                    distance = option["distance"]
+                    color = option["color"]
+                    
+                    # Use button with custom styling
+                    button_label = f"{emoji} {emotion.capitalize()} ({distance} hops)"
+                    button_style = f"background-color: {color}; color: white;"
+                    
+                    if st.button(button_label, key=f"goal_{i}", use_container_width=True):
+                        self.select_goal(i)
+                        st.rerun()
+        
         # Chat input
         if prompt := st.chat_input("How are you feeling?"):
+            logger.info(f"User input: {prompt[:50]}...")
             # Add user message to chat
             st.session_state.messages.append({"role": "user", "content": prompt})
             
@@ -184,6 +213,7 @@ class UIStream:
         Args:
             message: User's message
         """
+        logger.info("Processing user message")
         # Create a placeholder for streaming response
         with st.chat_message("assistant"):
             placeholder = st.empty()
@@ -198,58 +228,38 @@ class UIStream:
             emoji = emotion_data["emoji"]
             color = emotion_data["color"]
             
+            logger.info(f"Classified emotion: {emotion}")
+            
             # Update session state
             st.session_state.current_emotion = emotion
             
             # Format the emotion badge
             emotion_badge = self.format_emotion(emotion, emoji, color)
             
+            # Acknowledge the user's feelings with empathy
+            acknowledgement = self._get_acknowledgement(emotion, message)
+            
             # Add emotion message to chat history
             st.session_state.messages.append({
                 "role": "assistant",
-                "content": f"I sense that you're feeling **{emotion}**. {emotion_badge}",
+                "content": f"{acknowledgement} {emotion_badge}",
                 "is_emotion": True
             })
             
-            # Display the emotion 
-            placeholder.markdown(f"I sense that you're feeling **{emotion}**. {emotion_badge}", unsafe_allow_html=True)
+            # Display the emotion with acknowledgement
+            placeholder.markdown(f"{acknowledgement} {emotion_badge}", unsafe_allow_html=True)
             
-            # If no goal is set, show goal options
+            # If no goal is set, prepare to show goal options
             if not st.session_state.goal_emotion:
                 time.sleep(0.5)  # Brief pause for better UX
                 
                 # Get goal options
                 goal_options = self.journey_manager.get_goal_options(n=2)
                 st.session_state.goal_options = goal_options
+                st.session_state.show_goal_buttons = True
                 
-                # Format goal options
-                goal_options_html = """
-                <div style="margin-top: 15px;">
-                    <p><strong>What emotion would you like to work towards?</strong></p>
-                """
-                
-                for i, option in enumerate(goal_options):
-                    goal_options_html += f"""
-                    <div onclick="parent.postMessage({{command: 'streamlitSelectGoal', option: {i}}}, '*')" style="cursor:pointer;">
-                        {self.format_goal_option(option)}
-                    </div>
-                    """
-                
-                goal_options_html += "</div>"
-                
-                # Add goal options to chat history
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": goal_options_html,
-                    "is_goal_options": True
-                })
-                
-                # Display goal options
-                placeholder.markdown(goal_options_html, unsafe_allow_html=True)
-                
-                # Note: In a real implementation, we would need JavaScript to handle the goal selection
-                # Since Streamlit limitations prevent direct onclick handling,
-                # we would need to use two columns with buttons or other Streamlit components
+                # Force rerun to show the buttons
+                st.rerun()
             
             # If goal is set, show suggestions
             elif st.session_state.goal_emotion:
@@ -285,19 +295,40 @@ class UIStream:
                 # Display suggestions
                 placeholder.markdown(suggestions_html, unsafe_allow_html=True)
     
+    def _get_acknowledgement(self, emotion: str, message: str) -> str:
+        """
+        Generate an empathetic acknowledgement based on the detected emotion.
+        
+        Args:
+            emotion: Detected emotion
+            message: User's message
+            
+        Returns:
+            Acknowledgement text
+        """
+        acknowledgements = {
+            "joy": "I'm glad to hear you're feeling happy!",
+            "sadness": "I understand that you're feeling down right now.",
+            "anger": "I can see that you're feeling frustrated.",
+            "fear": "It sounds like you're feeling anxious or worried.",
+            "disgust": "I notice you're feeling uncomfortable with this situation.",
+            "surprise": "That seems to have caught you off guard!",
+            "trust": "I appreciate your openness and trust.",
+            "anticipation": "I can see you're looking forward to what comes next."
+        }
+        
+        return acknowledgements.get(emotion, f"I sense that you're feeling **{emotion}**.")
+    
     def run(self):
         """Run the UI Stream application."""
+        logger.info("Starting UI Stream application")
         self.render_chat_ui()
-        
-        # Note: In a real implementation, we would need to add handlers for:
-        # 1. Goal selection (could use Streamlit components or alternative UI elements)
-        # 2. Suggestion selection feedback
-        # These are omitted here for simplicity since they require JavaScript integration
 
 
 # Streamlit page configuration
 def setup_page():
     """Configure Streamlit page settings."""
+    logger.info("Setting up page configuration")
     st.set_page_config(
         page_title="EmoJourney - Emotional Planner Chat",
         page_icon="🧠",
@@ -322,6 +353,14 @@ def setup_page():
         background-color: #f44336;
         color: white;
         font-weight: bold;
+    }
+    
+    /* Style for goal buttons */
+    button[data-testid="baseButton-secondary"] {
+        margin: 5px 0;
+        border-radius: 15px;
+        font-weight: bold;
+        text-align: center;
     }
     </style>
     """, unsafe_allow_html=True) 

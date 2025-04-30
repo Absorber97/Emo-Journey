@@ -6,10 +6,14 @@ from collections import deque
 from typing import Dict, List, Tuple, Optional, Any, Union
 import json
 import openai
+import logging
 
-from src.emotion_api import EmotionAPI
-from src.graph_planner import EmotionGraph
-from src.cache import emotion_cache
+from emotion_api import EmotionAPI
+from graph_planner import EmotionGraph
+from cache import emotion_cache
+
+# Get logger
+logger = logging.getLogger("EmoJourney")
 
 class JourneyManager:
     """
@@ -171,6 +175,7 @@ class JourneyManager:
         cached_suggestions = emotion_cache.get(cache_key)
         
         if cached_suggestions:
+            logger.info(f"Using cached suggestions for {self.current_emotion} -> {self.goal_emotion}")
             return cached_suggestions
         
         # Create system prompt for suggestion generation
@@ -204,6 +209,7 @@ class JourneyManager:
         
         try:
             # Call OpenAI API for suggestions
+            logger.info(f"Generating suggestions for {self.current_emotion} -> {self.goal_emotion}")
             client = openai.OpenAI(api_key=self.emotion_api.api_key)
             response = client.chat.completions.create(
                 model=model,
@@ -214,7 +220,12 @@ class JourneyManager:
             )
             
             # Parse and process the response
-            result = json.loads(response.choices[0].message.content)
+            content = response.choices[0].message.content
+            if not content:
+                logger.warning("Empty response from OpenAI API")
+                raise ValueError("Empty response from OpenAI API")
+                
+            result = json.loads(content)
             suggestions = result if isinstance(result, list) else result.get("suggestions", [])
             
             # Validate and enhance the suggestions
@@ -227,11 +238,12 @@ class JourneyManager:
             
             # Cache the validated suggestions
             emotion_cache.set(cache_key, suggestions)
+            logger.info(f"Cached {len(suggestions)} suggestions")
             
             return suggestions
         
         except Exception as e:
-            print(f"Error generating suggestions: {e}")
+            logger.error(f"Error generating suggestions: {e}")
             # Return fallback suggestions
             return [
                 {

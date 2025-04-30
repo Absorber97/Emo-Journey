@@ -4,8 +4,8 @@ Main entry point for EmoJourney application.
 import os
 from dotenv import load_dotenv
 
-from src.ui_stream import UIStream, setup_page
-from src.journey_manager import JourneyManager
+from ui_stream import UIStream, setup_page
+from journey_manager import JourneyManager
 
 def main():
     """Main application entry point."""
