@@ -63,16 +63,33 @@ class JourneyManager:
         self.current_emotion = emotion
         self.history.append(emotion)
         
-        # Reset goal if it was reached
-        if self.goal_emotion and self.goal_emotion == emotion:
-            self.reset_goal()
+        # Check if goal has been reached
+        goal_reached = self.check_goal_reached()
         
         return {
             "emotion": emotion,
             "confidence": confidence,
             "emoji": emoji,
-            "color": color
+            "color": color,
+            "goal_reached": goal_reached
         }
+    
+    def check_goal_reached(self) -> bool:
+        """
+        Check if the user has reached their goal emotion.
+        
+        Returns:
+            True if the goal emotion has been reached, False otherwise
+        """
+        if not self.goal_emotion or not self.current_emotion:
+            return False
+        
+        goal_reached = self.goal_emotion == self.current_emotion
+        
+        # If goal is reached, keep it set for the congratulations message
+        # but prepare to reset after that
+        
+        return goal_reached
     
     def get_goal_options(self, n: int = 2) -> List[Dict[str, Any]]:
         """

@@ -183,16 +183,44 @@ class UIStream:
         Returns:
             Formatted HTML for the suggestion
         """
+        # Choose emoji based on percentage
+        percentage = suggestion['closer_percentage']
+        if percentage >= 75:
+            progress_emoji = "🚀"  # Rocket for big jump
+        elif percentage >= 50:
+            progress_emoji = "⏩"  # Fast forward
+        elif percentage >= 25:
+            progress_emoji = "👣"  # Footsteps
+        else:
+            progress_emoji = "🌱"  # Small growth
+        
+        # Choose color based on percentage
+        if percentage >= 75:
+            color = "#2E7D32"  # Dark green
+        elif percentage >= 50:
+            color = "#4CAF50"  # Medium green
+        elif percentage >= 25:
+            color = "#8BC34A"  # Light green
+        else:
+            color = "#C5E1A5"  # Very light green
+        
         return f"""
         <div style="
-            padding: 10px 15px;
-            margin: 10px 0;
-            background-color: #f0f0f0;
-            border-radius: 10px;
-            border-left: 5px solid #4CAF50;
+            padding: 15px;
+            margin: 15px 0;
+            background-color: #f8f9fa;
+            border-radius: 12px;
+            border-left: 8px solid {color};
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         ">
-            <h4 style="margin: 0 0 5px 0;">{suggestion['title']} ({suggestion['closer_percentage']}% closer)</h4>
-            <p style="margin: 0;">{suggestion['description']}</p>
+            <h4 style="margin: 0 0 8px 0; color: {color};">{progress_emoji} {suggestion['title']} <span style="
+                background-color: {color};
+                color: white;
+                padding: 3px 8px;
+                border-radius: 10px;
+                font-size: 0.9em;
+            ">{suggestion['closer_percentage']}% closer</span></h4>
+            <p style="margin: 0; font-size: 1.05em;">{suggestion['description']}</p>
         </div>
         """
     
@@ -207,10 +235,40 @@ class UIStream:
         Returns:
             Formatted HTML for suggestions
         """
+        # Get goal emotion data
+        goal_emotion = st.session_state.goal_emotion
+        goal_emoji = self.journey_manager.emotion_api.EMOTIONS.get(goal_emotion, "❓")
+        goal_color = self.journey_manager.emotion_api.EMOTION_COLORS.get(goal_emotion, "#808080")
+        
         suggestions_html = f"""
-        <div style="margin-top: 15px;">
-            <p><strong>Working towards {st.session_state.goal_emotion} 
-            ({progress['progress']}% progress)</strong></p>
+        <div style="
+            margin: 15px 0;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 15px;
+            border: 1px solid {goal_color};
+        ">
+            <div style="
+                padding: 8px 12px;
+                margin-bottom: 10px;
+                background-color: {goal_color};
+                color: white;
+                border-radius: 8px;
+                font-weight: bold;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            ">
+                <span>Working towards {goal_emoji} <strong>{goal_emotion.capitalize()}</strong></span>
+                <span style="
+                    background-color: white;
+                    color: {goal_color};
+                    padding: 3px 8px;
+                    border-radius: 10px;
+                    font-size: 0.9em;
+                    font-weight: bold;
+                ">{progress['progress']}% progress</span>
+            </div>
         """
         
         if suggestions:
@@ -218,20 +276,20 @@ class UIStream:
             for suggestion in suggestions:
                 suggestions_html += self.format_suggestion(suggestion)
         else:
+            # Fallback suggestions with new styling
             suggestions_html += """
             <p>I'm working on personalized suggestions for you. 
             In the meantime, try to think about what might help you move toward your goal emotion.</p>
-            <div style="
-                padding: 10px 15px;
-                margin: 10px 0;
-                background-color: #f0f0f0;
-                border-radius: 10px;
-                border-left: 5px solid #4CAF50;
-            ">
-                <h4 style="margin: 0 0 5px 0;">Reflect on your goal (25% closer)</h4>
-                <p style="margin: 0;">Take a moment to think about times when you've felt your goal emotion before.</p>
-            </div>
             """
+            
+            # Create a fallback suggestion with the same styling as regular suggestions
+            fallback_suggestion = {
+                'title': 'Reflect on your goal',
+                'description': 'Take a moment to think about times when you\'ve felt your goal emotion before.',
+                'closer_percentage': 25
+            }
+            
+            suggestions_html += self.format_suggestion(fallback_suggestion)
         
         suggestions_html += "</div>"
         return suggestions_html
@@ -268,7 +326,10 @@ class UIStream:
         # Display goal buttons if needed
         if st.session_state.show_goal_buttons and st.session_state.goal_options:
             with st.chat_message("assistant"):
-                st.markdown("**What emotion would you like to work towards?**")
+                st.markdown("<h4 style='margin-bottom: 15px;'>What emotion would you like to work towards?</h4>", unsafe_allow_html=True)
+                
+                # Create a columns layout for buttons
+                cols = st.columns(2)
                 
                 # Create buttons for each goal option
                 for i, option in enumerate(st.session_state.goal_options):
@@ -277,13 +338,44 @@ class UIStream:
                     distance = option["distance"]
                     color = option["color"]
                     
-                    # Use button with custom styling
-                    button_label = f"{emoji} {emotion.capitalize()} ({distance} hops)"
-                    button_style = f"background-color: {color}; color: white;"
-                    
-                    if st.button(button_label, key=f"goal_{i}", use_container_width=True):
-                        self.select_goal(i)
-                        st.rerun()
+                    # Custom button styling
+                    with cols[i]:
+                        # Use custom HTML for better styling
+                        st.markdown(f"""
+                        <div id="goal_button_{i}" style="
+                            background-color: {color};
+                            color: white;
+                            padding: 15px;
+                            border-radius: 15px;
+                            margin: 5px 0;
+                            text-align: center;
+                            cursor: pointer;
+                            font-weight: bold;
+                            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+                            transition: all 0.3s ease;
+                        ">
+                            <div style="font-size: 1.8em;">{emoji}</div>
+                            <div>{emotion.capitalize()}</div>
+                            <div style="
+                                background-color: rgba(255,255,255,0.3);
+                                padding: 3px 8px;
+                                border-radius: 10px;
+                                margin-top: 5px;
+                                font-size: 0.8em;
+                            ">{distance} steps away</div>
+                        </div>
+                        <script>
+                            document.getElementById("goal_button_{i}").addEventListener("click", function() {{
+                                this.style.transform = "scale(0.95)";
+                                this.style.backgroundColor = "darken({color}, 10%)";
+                            }});
+                        </script>
+                        """, unsafe_allow_html=True)
+                        
+                        # Hidden button for actual functionality
+                        if st.button(f"Select {emotion}", key=f"goal_{i}", use_container_width=True):
+                            self.select_goal(i)
+                            st.rerun()
         
         # Chat input
         if prompt := st.chat_input("How are you feeling?"):
@@ -321,11 +413,13 @@ class UIStream:
                 emotion = emotion_data["emotion"]
                 emoji = emotion_data["emoji"]
                 color = emotion_data["color"]
+                goal_reached = emotion_data.get("goal_reached", False)
                 
                 log_state(f"Classified emotion", {
                     "emotion": emotion,
                     "emoji": emoji,
-                    "confidence": emotion_data.get("confidence", "N/A")
+                    "confidence": emotion_data.get("confidence", "N/A"),
+                    "goal_reached": goal_reached
                 })
                 
                 # Update session state
@@ -347,8 +441,38 @@ class UIStream:
                 # Display the emotion with acknowledgement
                 placeholder.markdown(f"{acknowledgement} {emotion_badge}", unsafe_allow_html=True)
                 
+                # Handle goal reached case
+                if goal_reached and st.session_state.goal_emotion:
+                    log_state(f"Goal reached: {st.session_state.goal_emotion}")
+                    time.sleep(0.7)  # Brief pause for better UX
+                    
+                    # Format congratulations message
+                    congrats_message = self._format_goal_reached_message(emotion, emoji, color)
+                    
+                    # Add congratulations to chat history
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": congrats_message,
+                        "is_congrats": True
+                    })
+                    
+                    # Display congratulations
+                    placeholder = st.empty()
+                    placeholder.markdown(congrats_message, unsafe_allow_html=True)
+                    
+                    # Reset goal but keep current emotion
+                    st.session_state.goal_emotion = None
+                    st.session_state.show_goal_buttons = True
+                    
+                    # Get new goal options for next journey
+                    goal_options = self.journey_manager.get_goal_options(n=2)
+                    st.session_state.goal_options = goal_options
+                    
+                    # Force rerun to show the new goal buttons
+                    st.rerun()
+                
                 # If no goal is set, prepare to show goal options
-                if not st.session_state.goal_emotion:
+                elif not st.session_state.goal_emotion:
                     log_state("No goal set, showing goal options")
                     time.sleep(0.5)  # Brief pause for better UX
                     
@@ -426,6 +550,35 @@ class UIStream:
         
         return acknowledgements.get(emotion, f"I sense that you're feeling **{emotion}**.")
     
+    def _format_goal_reached_message(self, emotion: str, emoji: str, color: str) -> str:
+        """
+        Format the congratulations message when a goal is reached.
+        
+        Args:
+            emotion: Current emotion
+            emoji: Emoji for the emotion
+            color: Color hex code
+            
+        Returns:
+            Formatted HTML for the congratulations message
+        """
+        return f"""
+        <div style="
+            padding: 15px;
+            margin: 10px 0;
+            background-color: #f8f9fa;
+            border-radius: 10px;
+            border: 2px solid {color};
+            text-align: center;
+        ">
+            <h3 style="margin: 0 0 10px 0; color: {color};">🎉 Congratulations! 🎉</h3>
+            <p>You've successfully reached your emotional goal of <strong>{emotion}</strong> {emoji}!</p>
+            <p>Would you like to:</p>
+            <p>• Continue with a new emotional goal</p>
+            <p>• Keep expressing how you feel</p>
+        </div>
+        """
+    
     def run(self):
         """Run the UI Stream application."""
         log_state("Starting UI Stream application")
@@ -462,12 +615,55 @@ def setup_page():
         font-weight: bold;
     }
     
+    /* Hover effect for buttons */
+    .stButton button:hover {
+        background-color: #d32f2f !important;
+        color: white !important;
+        transform: scale(1.02);
+        transition: all 0.2s ease;
+    }
+    
     /* Style for goal buttons */
     button[data-testid="baseButton-secondary"] {
         margin: 5px 0;
         border-radius: 15px;
         font-weight: bold;
         text-align: center;
+        transition: all 0.3s ease;
+    }
+    
+    /* Hover effect for goal buttons */
+    button[data-testid="baseButton-secondary"]:hover {
+        opacity: 0.9;
+        transform: scale(1.02);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    
+    /* Style for chat messages */
+    div[data-testid="stChatMessageContent"] {
+        border-radius: 12px;
+        padding: 12px;
+    }
+    
+    /* Style for assistant messages */
+    div[data-testid="stChatMessageContent"][aria-label="assistant"] {
+        background-color: #f8f9fa;
+    }
+    
+    /* Hide functional goal selection buttons but keep them clickable */
+    button[key^="goal_"] {
+        height: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+        position: absolute !important;
+        top: 0 !important;
+        opacity: 0 !important;
+        cursor: pointer !important;
+    }
+
+    /* Remove container padding for cleaner button display */
+    div.stButton {
+        padding: 0 !important;
     }
     </style>
     """, unsafe_allow_html=True) 
