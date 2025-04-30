@@ -22,6 +22,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger("EmoJourney")
 
+# Add a function to log state changes
+def log_state(message, state_data=None):
+    """Log state changes with detailed information."""
+    if state_data:
+        logger.info(f"{message}: {state_data}")
+    else:
+        logger.info(message)
+
 class UIStream:
     """Streamlit UI handler with streaming capabilities."""
     
@@ -60,7 +68,7 @@ class UIStream:
     
     def reset_chat(self):
         """Reset the chat and all state."""
-        logger.info("Resetting chat")
+        log_state("Resetting chat and clearing all state")
         st.session_state.messages = []
         st.session_state.current_emotion = None
         st.session_state.goal_emotion = None
@@ -75,6 +83,7 @@ class UIStream:
             "content": "Hello! How are you feeling today?",
             "is_emotion": False
         })
+        log_state("Added welcome message to reset chat")
     
     def format_emotion(self, emotion: str, emoji: str, color: str) -> str:
         """
@@ -110,19 +119,59 @@ class UIStream:
             index: Index of selected goal option
         """
         if 0 <= index < len(st.session_state.goal_options):
-            logger.info(f"User selected goal: {st.session_state.goal_options[index]['emotion']}")
             selected_goal = st.session_state.goal_options[index]['emotion']
+            emoji = st.session_state.goal_options[index]['emoji']
+            
+            log_state(f"User selected goal", {
+                "emotion": selected_goal,
+                "emoji": emoji,
+                "index": index
+            })
+            
             self.journey_manager.set_goal(selected_goal)
             st.session_state.goal_emotion = selected_goal
             st.session_state.show_goal_buttons = False
             
             # Add selected goal message
-            emoji = st.session_state.goal_options[index]['emoji']
             st.session_state.messages.append({
                 "role": "assistant",
                 "content": f"You've chosen to work towards **{selected_goal}** {emoji}. Let me help you with that.",
                 "is_emotion": False
             })
+            
+            # Generate suggestions immediately after goal selection
+            log_state("Generating suggestions after goal selection")
+            time.sleep(0.7)  # Brief pause for better UX
+            
+            try:
+                # Get progress
+                progress = self.journey_manager.get_progress()
+                log_state("Journey progress", progress)
+                
+                # Get suggestions
+                suggestions = self.journey_manager.generate_suggestions()
+                log_state(f"Generated {len(suggestions)} suggestions")
+                st.session_state.suggestions = suggestions
+                
+                # Format suggestions
+                suggestions_html = self._format_suggestions_html(suggestions, progress)
+                
+                # Add suggestions to chat history
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": suggestions_html,
+                    "is_suggestions": True
+                })
+                
+                log_state("Added suggestions to chat history")
+            except Exception as e:
+                logger.error(f"Error generating suggestions: {str(e)}")
+                # Add fallback message
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"I'm having trouble generating suggestions right now. Let's try again later.",
+                    "is_emotion": False
+                })
     
     def format_suggestion(self, suggestion: Dict[str, Any]) -> str:
         """
@@ -147,6 +196,46 @@ class UIStream:
         </div>
         """
     
+    def _format_suggestions_html(self, suggestions, progress):
+        """
+        Format suggestions as HTML.
+        
+        Args:
+            suggestions: List of suggestion dictionaries
+            progress: Progress data dictionary
+            
+        Returns:
+            Formatted HTML for suggestions
+        """
+        suggestions_html = f"""
+        <div style="margin-top: 15px;">
+            <p><strong>Working towards {st.session_state.goal_emotion} 
+            ({progress['progress']}% progress)</strong></p>
+        """
+        
+        if suggestions:
+            suggestions_html += "<p>Here are some suggestions:</p>"
+            for suggestion in suggestions:
+                suggestions_html += self.format_suggestion(suggestion)
+        else:
+            suggestions_html += """
+            <p>I'm working on personalized suggestions for you. 
+            In the meantime, try to think about what might help you move toward your goal emotion.</p>
+            <div style="
+                padding: 10px 15px;
+                margin: 10px 0;
+                background-color: #f0f0f0;
+                border-radius: 10px;
+                border-left: 5px solid #4CAF50;
+            ">
+                <h4 style="margin: 0 0 5px 0;">Reflect on your goal (25% closer)</h4>
+                <p style="margin: 0;">Take a moment to think about times when you've felt your goal emotion before.</p>
+            </div>
+            """
+        
+        suggestions_html += "</div>"
+        return suggestions_html
+    
     def render_chat_ui(self):
         """Render the main chat UI with messages and input."""
         # Title with emoji
@@ -168,6 +257,9 @@ class UIStream:
             with st.chat_message(message["role"]):
                 if message.get("is_emotion", False):
                     # Render emotion badge
+                    st.markdown(message["content"], unsafe_allow_html=True)
+                elif message.get("is_suggestions", False):
+                    # Render suggestions with HTML
                     st.markdown(message["content"], unsafe_allow_html=True)
                 else:
                     # Render regular message
@@ -213,7 +305,8 @@ class UIStream:
         Args:
             message: User's message
         """
-        logger.info("Processing user message")
+        log_state("Processing user message", {"message_preview": message[:50] + "..." if len(message) > 50 else message})
+        
         # Create a placeholder for streaming response
         with st.chat_message("assistant"):
             placeholder = st.empty()
@@ -222,78 +315,92 @@ class UIStream:
             display_text = "Analyzing your emotions..."
             placeholder.markdown(display_text)
             
-            # Get emotion classification
-            emotion_data = self.journey_manager.classify_user_message(message)
-            emotion = emotion_data["emotion"]
-            emoji = emotion_data["emoji"]
-            color = emotion_data["color"]
-            
-            logger.info(f"Classified emotion: {emotion}")
-            
-            # Update session state
-            st.session_state.current_emotion = emotion
-            
-            # Format the emotion badge
-            emotion_badge = self.format_emotion(emotion, emoji, color)
-            
-            # Acknowledge the user's feelings with empathy
-            acknowledgement = self._get_acknowledgement(emotion, message)
-            
-            # Add emotion message to chat history
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": f"{acknowledgement} {emotion_badge}",
-                "is_emotion": True
-            })
-            
-            # Display the emotion with acknowledgement
-            placeholder.markdown(f"{acknowledgement} {emotion_badge}", unsafe_allow_html=True)
-            
-            # If no goal is set, prepare to show goal options
-            if not st.session_state.goal_emotion:
-                time.sleep(0.5)  # Brief pause for better UX
+            try:
+                # Get emotion classification
+                emotion_data = self.journey_manager.classify_user_message(message)
+                emotion = emotion_data["emotion"]
+                emoji = emotion_data["emoji"]
+                color = emotion_data["color"]
                 
-                # Get goal options
-                goal_options = self.journey_manager.get_goal_options(n=2)
-                st.session_state.goal_options = goal_options
-                st.session_state.show_goal_buttons = True
-                
-                # Force rerun to show the buttons
-                st.rerun()
-            
-            # If goal is set, show suggestions
-            elif st.session_state.goal_emotion:
-                time.sleep(0.7)  # Brief pause for better UX
-                
-                # Get progress
-                progress = self.journey_manager.get_progress()
-                
-                # Get suggestions
-                suggestions = self.journey_manager.generate_suggestions()
-                st.session_state.suggestions = suggestions
-                
-                # Format suggestions
-                suggestions_html = f"""
-                <div style="margin-top: 15px;">
-                    <p><strong>Working towards {st.session_state.goal_emotion} 
-                    ({progress['progress']}% progress)</strong></p>
-                    <p>Here are some suggestions:</p>
-                """
-                
-                for suggestion in suggestions:
-                    suggestions_html += self.format_suggestion(suggestion)
-                
-                suggestions_html += "</div>"
-                
-                # Add suggestions to chat history
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": suggestions_html,
-                    "is_suggestions": True
+                log_state(f"Classified emotion", {
+                    "emotion": emotion,
+                    "emoji": emoji,
+                    "confidence": emotion_data.get("confidence", "N/A")
                 })
                 
-                # Display suggestions
-                placeholder.markdown(suggestions_html, unsafe_allow_html=True)
+                # Update session state
+                st.session_state.current_emotion = emotion
+                
+                # Format the emotion badge
+                emotion_badge = self.format_emotion(emotion, emoji, color)
+                
+                # Acknowledge the user's feelings with empathy
+                acknowledgement = self._get_acknowledgement(emotion, message)
+                
+                # Add emotion message to chat history
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"{acknowledgement} {emotion_badge}",
+                    "is_emotion": True
+                })
+                
+                # Display the emotion with acknowledgement
+                placeholder.markdown(f"{acknowledgement} {emotion_badge}", unsafe_allow_html=True)
+                
+                # If no goal is set, prepare to show goal options
+                if not st.session_state.goal_emotion:
+                    log_state("No goal set, showing goal options")
+                    time.sleep(0.5)  # Brief pause for better UX
+                    
+                    # Get goal options
+                    goal_options = self.journey_manager.get_goal_options(n=2)
+                    log_state(f"Retrieved {len(goal_options)} goal options", 
+                             {"options": [opt["emotion"] for opt in goal_options]})
+                    
+                    st.session_state.goal_options = goal_options
+                    st.session_state.show_goal_buttons = True
+                    
+                    # Force rerun to show the buttons
+                    st.rerun()
+                
+                # If goal is set, show suggestions
+                elif st.session_state.goal_emotion:
+                    log_state(f"Goal already set: {st.session_state.goal_emotion}, generating suggestions")
+                    time.sleep(0.7)  # Brief pause for better UX
+                    
+                    # Get progress
+                    progress = self.journey_manager.get_progress()
+                    log_state("Journey progress", progress)
+                    
+                    # Get suggestions
+                    suggestions = self.journey_manager.generate_suggestions()
+                    log_state(f"Generated {len(suggestions)} suggestions")
+                    st.session_state.suggestions = suggestions
+                    
+                    # Format suggestions
+                    suggestions_html = self._format_suggestions_html(suggestions, progress)
+                    
+                    # Add suggestions to chat history
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": suggestions_html,
+                        "is_suggestions": True
+                    })
+                    
+                    # Display suggestions
+                    placeholder.markdown(suggestions_html, unsafe_allow_html=True)
+                    log_state("Displayed suggestions to user")
+            
+            except Exception as e:
+                logger.error(f"Error processing message: {str(e)}")
+                # Display error message
+                error_message = "I'm having trouble processing your message. Please try again."
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": error_message,
+                    "is_error": True
+                })
+                placeholder.markdown(error_message)
     
     def _get_acknowledgement(self, emotion: str, message: str) -> str:
         """
@@ -321,14 +428,14 @@ class UIStream:
     
     def run(self):
         """Run the UI Stream application."""
-        logger.info("Starting UI Stream application")
+        log_state("Starting UI Stream application")
         self.render_chat_ui()
 
 
 # Streamlit page configuration
 def setup_page():
     """Configure Streamlit page settings."""
-    logger.info("Setting up page configuration")
+    log_state("Setting up page configuration")
     st.set_page_config(
         page_title="EmoJourney - Emotional Planner Chat",
         page_icon="🧠",

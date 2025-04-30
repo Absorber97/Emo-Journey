@@ -224,36 +224,124 @@ class JourneyManager:
             if not content:
                 logger.warning("Empty response from OpenAI API")
                 raise ValueError("Empty response from OpenAI API")
+            
+            suggestions = []  # Initialize suggestions as empty list to fix linter error
                 
-            result = json.loads(content)
-            suggestions = result if isinstance(result, list) else result.get("suggestions", [])
-            
-            # Validate and enhance the suggestions
-            for suggestion in suggestions:
-                if "closer_percentage" not in suggestion:
-                    suggestion["closer_percentage"] = 25  # Default value
+            try:
+                result = json.loads(content)
                 
-                # Ensure percentage is in valid range
-                suggestion["closer_percentage"] = max(10, min(95, suggestion["closer_percentage"]))
-            
-            # Cache the validated suggestions
-            emotion_cache.set(cache_key, suggestions)
-            logger.info(f"Cached {len(suggestions)} suggestions")
-            
-            return suggestions
+                # Handle different response formats
+                if isinstance(result, list):
+                    suggestions = result
+                elif isinstance(result, dict) and "suggestions" in result:
+                    suggestions = result.get("suggestions", [])
+                elif isinstance(result, dict):
+                    # Extract suggestions array from the top level object
+                    # This is needed because sometimes GPT wraps the array in an object
+                    suggestions = []
+                    for key, value in result.items():
+                        if isinstance(value, list) and len(value) > 0:
+                            if all(isinstance(item, dict) and "title" in item for item in value):
+                                suggestions = value
+                                break
+                    
+                    # If we still don't have suggestions, try to create them from the response
+                    if not suggestions and len(result) >= 1:
+                        # Convert numbered keys to suggestions
+                        for key in ["1", "2", 1, 2]:
+                            if key in result and isinstance(result[key], dict):
+                                item = result[key]
+                                if "title" not in item and "description" in item:
+                                    # Create a title from the first few words of description
+                                    description = item["description"]
+                                    title_words = description.split()[:3]
+                                    item["title"] = " ".join(title_words) + "..."
+                                suggestions.append(item)
+                
+                # If still no valid suggestions, use the fallback
+                if not suggestions:
+                    logger.warning("No valid suggestions found in API response, using fallback")
+                    raise ValueError("No valid suggestions found in API response")
+                
+                # Ensure we have at least 2 suggestions
+                if len(suggestions) < 2:
+                    logger.warning(f"Only {len(suggestions)} suggestions found, adding fallback suggestion")
+                    suggestions.append({
+                        "title": "Try something new",
+                        "description": f"Do something unexpected that might bring you closer to feeling {self.goal_emotion}.",
+                        "closer_percentage": 20
+                    })
+                
+                # Validate and enhance the suggestions
+                for suggestion in suggestions:
+                    if "closer_percentage" not in suggestion:
+                        suggestion["closer_percentage"] = 25  # Default value
+                    elif not isinstance(suggestion["closer_percentage"], int):
+                        # Try to convert to int if it's a string
+                        try:
+                            suggestion["closer_percentage"] = int(suggestion["closer_percentage"])
+                        except (ValueError, TypeError):
+                            suggestion["closer_percentage"] = 25
+                    
+                    # Ensure percentage is in valid range
+                    suggestion["closer_percentage"] = max(10, min(95, suggestion["closer_percentage"]))
+                
+                # Cache the validated suggestions
+                emotion_cache.set(cache_key, suggestions)
+                logger.info(f"Cached {len(suggestions)} suggestions")
+                
+                return suggestions
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON parsing error: {e}, content: {content[:100]}...")
+                raise ValueError(f"Invalid JSON response: {e}")
         
         except Exception as e:
             logger.error(f"Error generating suggestions: {e}")
-            # Return fallback suggestions
+            # Return fallback suggestions that are tailored to the specific emotion journey
+            if self.current_emotion and self.goal_emotion:
+                next_step = ""
+                if self.path and len(self.path) > 1:
+                    current_index = self.path.index(self.current_emotion) if self.current_emotion in self.path else 0
+                    if current_index + 1 < len(self.path):
+                        next_step = self.path[current_index + 1]
+                
+                # First suggestion is always about the specific transition
+                suggestions = [
+                    {
+                        "title": f"From {self.current_emotion} to {self.goal_emotion}",
+                        "description": f"Take a moment to think about times when you felt {self.goal_emotion} in the past and what triggered those feelings.",
+                        "closer_percentage": 30
+                    }
+                ]
+                
+                # Second suggestion is based on the next step if available
+                if next_step:
+                    suggestions.append({
+                        "title": f"Move toward {next_step}",
+                        "description": f"Try activities that might help you shift from {self.current_emotion} toward {next_step} as a stepping stone to {self.goal_emotion}.",
+                        "closer_percentage": 35
+                    })
+                else:
+                    suggestions.append({
+                        "title": "Small steps forward",
+                        "description": "Focus on one small action that might shift your emotional state slightly in your desired direction.",
+                        "closer_percentage": 25
+                    })
+                
+                logger.info(f"Using fallback suggestions for {self.current_emotion} -> {self.goal_emotion}")
+                return suggestions
+            
+            # Generic fallback if we don't have emotion data
             return [
                 {
-                    "title": f"Reflect on {self.goal_emotion}",
-                    "description": f"Take a moment to think about times when you felt {self.goal_emotion} in the past and what triggered those feelings.",
+                    "title": "Reflect on your emotions",
+                    "description": "Take a moment to identify and acknowledge what you're feeling right now without judgment.",
                     "closer_percentage": 30
                 },
                 {
-                    "title": "Small steps forward",
-                    "description": "Focus on one small action that might shift your emotional state slightly in your desired direction.",
+                    "title": "Try a new perspective",
+                    "description": "Consider looking at your situation from a different angle or through someone else's eyes.",
                     "closer_percentage": 25
                 }
             ]
