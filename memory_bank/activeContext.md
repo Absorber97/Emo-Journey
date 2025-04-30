@@ -1,7 +1,16 @@
-# EmoJourney - Active Context
+# Current Focus: CREATIVE PHASE
 
-## Current Focus
-Initializing project and setting up Memory Bank structure. Planning to implement a graph-based emotional planner with Streamlit UI and OpenAI integration.
+## Next Steps
+
+1. Design emotion graph structure:
+   - Define emotion nodes and their properties
+   - Determine transition weights and connectivity
+   - Create visual representation for validation
+
+2. Develop suggestion generation approach:
+   - Design template system for suggestions
+   - Create algorithm for calculating progress metrics
+   - Define presentation format for suggestions
 
 ## Task Requirements Mapping
 
@@ -13,10 +22,3 @@ Initializing project and setting up Memory Bank structure. Planning to implement
 2. Algorithms:
    - Dijkstra's Algorithm for path finding
    - Sorting for organizing suggestions
-
-## Next Steps
-
-1. Create project directory structure
-2. Initialize Python environment
-3. Begin implementing graph_planner.py with graph structure and Dijkstra's algorithm
-4. Develop basic emotion classification mechanism
