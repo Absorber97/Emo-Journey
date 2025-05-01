@@ -206,17 +206,22 @@ class JourneyManager:
         Generate two different practical suggestions that could help them move closer to their goal emotion.
         Each suggestion should be actionable and specific.
         
+        IMPORTANT: The first suggestion should be a quicker path (higher percentage closer),
+        while the second should be a deeper but slower approach (lower percentage closer).
+        
+        Make both suggestions specifically designed to help the person feel their target emotion ({self.goal_emotion}).
+        
         Respond with a JSON array of two suggestion objects in the following format:
         [
             {{
-                "title": "Short title for suggestion 1",
-                "description": "Detailed description of suggestion 1 (1-2 sentences)",
-                "closer_percentage": percentage_closer
+                "title": "Short title for quicker suggestion",
+                "description": "Detailed description of quicker suggestion (1-2 sentences)",
+                "closer_percentage": higher_percentage_closer
             }},
             {{
-                "title": "Short title for suggestion 2",
-                "description": "Detailed description of suggestion 2 (1-2 sentences)",
-                "closer_percentage": percentage_closer
+                "title": "Short title for deeper suggestion",
+                "description": "Detailed description of deeper suggestion (1-2 sentences)",
+                "closer_percentage": lower_percentage_closer
             }}
         ]
         
@@ -323,28 +328,21 @@ class JourneyManager:
                     if current_index + 1 < len(self.path):
                         next_step = self.path[current_index + 1]
                 
-                # First suggestion is always about the specific transition
+                # First suggestion is for a quicker path to the target emotion
                 suggestions = [
                     {
-                        "title": f"From {self.current_emotion} to {self.goal_emotion}",
-                        "description": f"Take a moment to think about times when you felt {self.goal_emotion} in the past and what triggered those feelings.",
-                        "closer_percentage": 30
+                        "title": f"Quick shift to {self.goal_emotion}",
+                        "description": f"Deliberately seek out content that triggers {self.goal_emotion} - watch a surprising video or ask a friend to tell you something unexpected.",
+                        "closer_percentage": 45
                     }
                 ]
                 
-                # Second suggestion is based on the next step if available
-                if next_step:
-                    suggestions.append({
-                        "title": f"Move toward {next_step}",
-                        "description": f"Try activities that might help you shift from {self.current_emotion} toward {next_step} as a stepping stone to {self.goal_emotion}.",
-                        "closer_percentage": 35
-                    })
-                else:
-                    suggestions.append({
-                        "title": "Small steps forward",
-                        "description": "Focus on one small action that might shift your emotional state slightly in your desired direction.",
-                        "closer_percentage": 25
-                    })
+                # Second suggestion is for a longer but more enriching path
+                suggestions.append({
+                    "title": f"Deeper emotional journey",
+                    "description": f"Start a journal where you explore your current {self.current_emotion} and then gradually introduce elements that might lead to {self.goal_emotion}.",
+                    "closer_percentage": 30
+                })
                 
                 logger.info(f"Using fallback suggestions for {self.current_emotion} -> {self.goal_emotion}")
                 return suggestions

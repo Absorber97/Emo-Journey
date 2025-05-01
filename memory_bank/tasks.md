@@ -40,6 +40,36 @@
 - [x] Improve suggestion visualization with cleaner layout
 - [x] Add visual indicators for progress towards emotional goals
 
+## Interactive Engagement Features
+
+- [x] Make suggestions clickable to track implementation progress
+- [x] Add visual feedback for implemented suggestions
+- [x] Improve suggestion titles to be more action-oriented
+- [x] Fix text contrast issues for better readability
+- [x] Implement progress flow after suggestion implementation
+- [x] Add implementation state tracking and visualization
+
+## UI and Guidance Refinement
+
+- [x] Remove duplicate implementation buttons
+- [x] Use distinct visual styling for different suggestions
+- [x] Apply different color schemes and emojis based on suggestion type
+- [x] Improve suggestion content to target specific emotions
+- [x] Provide quick path and deeper journey options
+- [x] Rename action buttons for clarity
+- [x] Update suggestions to guide users toward target emotion
+- [x] Enhance suggestion system prompt for better AI guidance
+
+## Interaction Flow Optimization
+
+- [x] Move "Choose" buttons inside suggestion cards
+- [x] Synchronize progress percentages across UI components
+- [x] Add immediate conversational response after suggestion choice
+- [x] Implement dedicated suggestion choice handler
+- [x] Update visual feedback for chosen vs. available suggestions
+- [x] Improve button placement and styling
+- [x] Ensure conversation continuity after choices
+
 ## Testing
 
 - [ ] Unit tests for graph_planner.py

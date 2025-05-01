@@ -64,6 +64,9 @@ class UIStream:
         if "show_goal_buttons" not in st.session_state:
             st.session_state.show_goal_buttons = False
             
+        if "implemented_suggestions" not in st.session_state:
+            st.session_state.implemented_suggestions = set()
+        
         self.journey_manager = st.session_state.journey_manager
     
     def reset_chat(self):
@@ -75,6 +78,7 @@ class UIStream:
         st.session_state.goal_options = []
         st.session_state.suggestions = []
         st.session_state.show_goal_buttons = False
+        st.session_state.implemented_suggestions = set()
         self.journey_manager.reset()
         
         # Add welcome message
@@ -173,54 +177,121 @@ class UIStream:
                     "is_emotion": False
                 })
     
-    def format_suggestion(self, suggestion: Dict[str, Any]) -> str:
+    def format_suggestion(self, suggestion: Dict[str, Any], index: int, progress: Dict[str, Any]) -> str:
         """
         Format a suggestion with title, description, and percentage.
         
         Args:
             suggestion: Suggestion dictionary
+            index: Index of the suggestion for button identification
+            progress: Progress data from journey manager
             
         Returns:
             Formatted HTML for the suggestion
         """
-        # Choose emoji based on percentage
-        percentage = suggestion['closer_percentage']
-        if percentage >= 75:
-            progress_emoji = "🚀"  # Rocket for big jump
-        elif percentage >= 50:
-            progress_emoji = "⏩"  # Fast forward
-        elif percentage >= 25:
-            progress_emoji = "👣"  # Footsteps
-        else:
-            progress_emoji = "🌱"  # Small growth
+        # Generate a unique ID for this suggestion
+        suggestion_id = f"suggestion_{index}_{hash(suggestion['title'])}"[:20]
         
-        # Choose color based on percentage
-        if percentage >= 75:
-            color = "#2E7D32"  # Dark green
-        elif percentage >= 50:
-            color = "#4CAF50"  # Medium green
-        elif percentage >= 25:
-            color = "#8BC34A"  # Light green
+        # Use the overall progress percentage for consistency
+        journey_progress = progress['progress']
+        
+        # Choose different emojis based on index to ensure variety
+        if index == 0:
+            # First suggestion uses regular progress emojis
+            percentage = suggestion['closer_percentage']
+            if percentage >= 75:
+                progress_emoji = "🚀"  # Rocket for big jump
+            elif percentage >= 50:
+                progress_emoji = "⏩"  # Fast forward
+            elif percentage >= 25:
+                progress_emoji = "👣"  # Footsteps
+            else:
+                progress_emoji = "🌱"  # Small growth
         else:
-            color = "#C5E1A5"  # Very light green
+            # Second suggestion uses different emojis
+            percentage = suggestion['closer_percentage']
+            if percentage >= 75:
+                progress_emoji = "✨"  # Sparkles for big impact
+            elif percentage >= 50:
+                progress_emoji = "🔄"  # Cycle for change
+            elif percentage >= 25:
+                progress_emoji = "🔍"  # Magnifying glass for discovery
+            else:
+                progress_emoji = "🧩"  # Puzzle piece for exploration
+        
+        # Different color schemes based on index
+        if index == 0:
+            # First suggestion uses green scheme
+            if percentage >= 75:
+                color = "#2E7D32"  # Dark green
+            elif percentage >= 50:
+                color = "#4CAF50"  # Medium green
+            elif percentage >= 25:
+                color = "#8BC34A"  # Light green
+            else:
+                color = "#C5E1A5"  # Very light green
+        else:
+            # Second suggestion uses blue/purple scheme
+            if percentage >= 75:
+                color = "#303F9F"  # Dark indigo
+            elif percentage >= 50:
+                color = "#5C6BC0"  # Medium indigo
+            elif percentage >= 25:
+                color = "#9FA8DA"  # Light indigo
+            else:
+                color = "#C5CAE9"  # Very light indigo
+        
+        # Check if this suggestion has been implemented
+        is_implemented = suggestion_id in st.session_state.implemented_suggestions
+        
+        # Create different styling based on implementation status
+        if is_implemented:
+            background_color = "#f0f8ff"  # Light blue background for implemented
+            border_style = "border-left: 8px solid #90caf9; opacity: 0.7;"
+            implemented_badge = '<span style="background-color: #90caf9; color: #fff; padding: 3px 8px; border-radius: 10px; font-size: 0.8em; margin-left: 10px;">✓ Chosen</span>'
+            button_style = "display: none;"
+        else:
+            background_color = "#f8f9fa"  # Default background
+            border_style = f"border-left: 8px solid {color};"
+            implemented_badge = ""
+            button_style = ""
         
         return f"""
-        <div style="
+        <div id="{suggestion_id}_container" style="
             padding: 15px;
             margin: 15px 0;
-            background-color: #f8f9fa;
+            background-color: {background_color};
             border-radius: 12px;
-            border-left: 8px solid {color};
+            {border_style}
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            position: relative;
+            transition: all 0.3s ease;
         ">
-            <h4 style="margin: 0 0 8px 0; color: {color};">{progress_emoji} {suggestion['title']} <span style="
-                background-color: {color};
-                color: white;
-                padding: 3px 8px;
-                border-radius: 10px;
-                font-size: 0.9em;
-            ">{suggestion['closer_percentage']}% closer</span></h4>
-            <p style="margin: 0; font-size: 1.05em;">{suggestion['description']}</p>
+            <h4 style="margin: 0 0 8px 0; color: {color};">
+                {progress_emoji} {suggestion['title']} {implemented_badge}
+                <span style="
+                    background-color: {color};
+                    color: #ffffff;
+                    padding: 3px 8px;
+                    border-radius: 10px;
+                    font-size: 0.9em;
+                    float: right;
+                    font-weight: bold;
+                ">{percentage}% closer</span>
+            </h4>
+            <p style="margin: 0; font-size: 1.05em; color: #333333;">{suggestion['description']}</p>
+            <div style="text-align: right; margin-top: 12px; {button_style}">
+                <button onclick="document.getElementById('{suggestion_id}_button').click();" style="
+                    background-color: {color};
+                    color: white;
+                    border: none;
+                    padding: 8px 15px;
+                    border-radius: 5px;
+                    cursor: pointer;
+                    font-weight: bold;
+                    font-size: 0.9em;
+                ">Choose</button>
+            </div>
         </div>
         """
     
@@ -273,8 +344,8 @@ class UIStream:
         
         if suggestions:
             suggestions_html += "<p>Here are some suggestions:</p>"
-            for suggestion in suggestions:
-                suggestions_html += self.format_suggestion(suggestion)
+            for i, suggestion in enumerate(suggestions):
+                suggestions_html += self.format_suggestion(suggestion, i, progress)
         else:
             # Fallback suggestions with new styling
             suggestions_html += """
@@ -289,10 +360,36 @@ class UIStream:
                 'closer_percentage': 25
             }
             
-            suggestions_html += self.format_suggestion(fallback_suggestion)
+            suggestions_html += self.format_suggestion(fallback_suggestion, 0, progress)
         
         suggestions_html += "</div>"
         return suggestions_html
+    
+    def handle_suggestion_choice(self, suggestion_index):
+        """
+        Handle when a user chooses a suggestion.
+        
+        Args:
+            suggestion_index: Index of the suggestion chosen
+        """
+        if 0 <= suggestion_index < len(st.session_state.suggestions):
+            suggestion = st.session_state.suggestions[suggestion_index]
+            suggestion_id = f"suggestion_{suggestion_index}_{hash(suggestion['title'])}"[:20]
+            
+            logger.info(f"User chose suggestion: {suggestion['title']}")
+            
+            # Mark this suggestion as implemented
+            st.session_state.implemented_suggestions.add(suggestion_id)
+            
+            # Get current progress
+            progress = self.journey_manager.get_progress()
+            
+            # Add a response acknowledging the choice
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": f"Great choice! That should help you move closer to feeling {st.session_state.goal_emotion}. How do you feel now?",
+                "is_emotion": False
+            })
     
     def render_chat_ui(self):
         """Render the main chat UI with messages and input."""
@@ -319,6 +416,17 @@ class UIStream:
                 elif message.get("is_suggestions", False):
                     # Render suggestions with HTML
                     st.markdown(message["content"], unsafe_allow_html=True)
+                    
+                    # Add invisible buttons for suggestions
+                    if "suggestions" in st.session_state and st.session_state.suggestions:
+                        # Create a container for the hidden buttons
+                        with st.container():
+                            for i, suggestion in enumerate(st.session_state.suggestions):
+                                suggestion_id = f"suggestion_{i}_{hash(suggestion['title'])}"[:20]
+                                # Create a unique button for each suggestion
+                                if st.button("Choose", key=suggestion_id + "_button", help="Click to choose this suggestion", type="secondary", use_container_width=False):
+                                    self.handle_suggestion_choice(i)
+                                    st.rerun()
                 else:
                     # Render regular message
                     st.markdown(message["content"])
@@ -659,6 +767,18 @@ def setup_page():
         top: 0 !important;
         opacity: 0 !important;
         cursor: pointer !important;
+    }
+
+    /* Hide suggestion implementation buttons but keep them clickable */
+    button[key$="_button"] {
+        height: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+        position: absolute !important;
+        top: 0 !important;
+        opacity: 0 !important;
+        cursor: pointer !important;
+        z-index: 10 !important;
     }
 
     /* Remove container padding for cleaner button display */
