@@ -222,18 +222,18 @@ class UIStream:
         else:
             color = "#9E9E9E"  # Grey for minimal progress
         
-        # Check if this suggestion has been implemented
-        is_implemented = suggestion_id in st.session_state.implemented_suggestions
+        # Check if this suggestion has been chosen
+        is_chosen = suggestion.get('chosen', False) or suggestion_id in st.session_state.implemented_suggestions
         
-        # Create different styling based on implementation status
-        if is_implemented:
-            background_color = "#f0f8ff"  # Light blue background for implemented
+        # Create different styling based on chosen status
+        if is_chosen:
+            background_color = "#f0f8ff"  # Light blue background for chosen
             border_style = "border-left: 8px solid #90caf9; opacity: 0.7;"
-            implemented_badge = '<span style="background-color: #90caf9; color: #fff; padding: 3px 8px; border-radius: 10px; font-size: 0.8em; margin-left: 10px;">✓ Chosen</span>'
+            chosen_badge = '<span style="background-color: #90caf9; color: #fff; padding: 3px 8px; border-radius: 10px; font-size: 0.8em; margin-left: 10px;">✓ Chosen</span>'
         else:
             background_color = "#f8f9fa"  # Default background
             border_style = f"border-left: 8px solid {color};"
-            implemented_badge = ""
+            chosen_badge = ""
         
         return f"""
         <div id="{suggestion_id}_container" style="
@@ -247,7 +247,7 @@ class UIStream:
             transition: all 0.3s ease;
         ">
             <h4 style="margin: 0 0 8px 0; color: {color};">
-                {progress_emoji} {suggestion['title']} {implemented_badge}
+                {progress_emoji} {suggestion['title']} {chosen_badge}
                 <span style="
                     background-color: {color};
                     color: #ffffff;
@@ -298,14 +298,6 @@ class UIStream:
                 justify-content: space-between;
             ">
                 <span>Working towards {goal_emoji} <strong>{goal_emotion.capitalize()}</strong></span>
-                <span style="
-                    background-color: white;
-                    color: {goal_color};
-                    padding: 3px 8px;
-                    border-radius: 10px;
-                    font-size: 0.9em;
-                    font-weight: bold;
-                ">{progress['progress']}% progress</span>
             </div>
         """
         
@@ -350,11 +342,22 @@ class UIStream:
             
             # Update progress based on suggestion's closer_percentage
             progress_before = self.journey_manager.get_progress()
-            
-            # Apply the suggestion's progress boost - this is simulated since we don't have a real simulation
-            # In a real emotional journey, we would update the journey manager with actual progress
-            # For now, we'll check if the suggestion gets us to the goal
             closer_percentage = suggestion.get('closer_percentage', 0)
+            
+            # Add a "Chosen" badge to the chosen suggestion
+            chosen_suggestion = {
+                'title': suggestion['title'],
+                'description': suggestion['description'],
+                'closer_percentage': suggestion['closer_percentage'],
+                'chosen': True
+            }
+            
+            # Add the chosen suggestion to the user's emotional journey context
+            if 'chosen_suggestions' not in st.session_state:
+                st.session_state.chosen_suggestions = []
+            st.session_state.chosen_suggestions.append(chosen_suggestion)
+            
+            # Simulate progress in the journey based on the suggestion's closer_percentage
             goal_reached = closer_percentage >= 95 or progress_before['progress'] + 30 >= 100
             
             # If goal is reached, notify journey manager
@@ -374,25 +377,28 @@ class UIStream:
                 # Re-enable chat
                 st.session_state.chat_disabled = False
             else:
-                # Add a response acknowledging the choice and encouraging next step
-                progress_after = self.journey_manager.get_progress()
-                
-                # Add response message
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": f"Good choice! You're making progress toward feeling {st.session_state.goal_emotion}. Let's continue with another suggestion.",
-                    "is_emotion": False
-                })
-                
-                # Get new suggestions
+                # Generate fresh suggestions based on the chosen suggestion
                 time.sleep(0.7)  # Brief pause for better UX
                 
                 # Get progress
                 progress = self.journey_manager.get_progress()
                 
-                # Get suggestions
-                suggestions = self.journey_manager.generate_suggestions()
+                # Provide context based on what the user has chosen so far
+                context = self._build_suggestion_context()
+                
+                # Generate completely new suggestions that build on the chosen path
+                suggestions = self.journey_manager.generate_fresh_suggestions(
+                    context=context,
+                    chosen_suggestion=suggestion['title']
+                )
                 st.session_state.suggestions = suggestions
+                
+                # Add response message acknowledging the choice
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"Good choice! Let's continue your journey toward {st.session_state.goal_emotion} with some fresh perspectives.",
+                    "is_emotion": False
+                })
                 
                 # Format suggestions
                 suggestions_html = self._format_suggestions_html(suggestions, progress)
@@ -403,6 +409,17 @@ class UIStream:
                     "content": suggestions_html,
                     "is_suggestions": True
                 })
+    
+    def _build_suggestion_context(self):
+        """Build context string based on user's emotional journey so far."""
+        context = f"Starting from {st.session_state.current_emotion}, aiming for {st.session_state.goal_emotion}."
+        
+        if hasattr(st.session_state, 'chosen_suggestions') and st.session_state.chosen_suggestions:
+            context += " Has chosen: "
+            chosen_titles = [s['title'] for s in st.session_state.chosen_suggestions]
+            context += ", ".join(chosen_titles)
+        
+        return context
     
     def render_chat_ui(self):
         """Render the main chat UI with messages and input."""
@@ -420,8 +437,14 @@ class UIStream:
         if not st.session_state.messages:
             self.reset_chat()
         
+        # Track the last suggestions block to only show buttons once
+        last_suggestions_index = -1
+        for i, message in enumerate(st.session_state.messages):
+            if message.get("is_suggestions", False):
+                last_suggestions_index = i
+        
         # Display chat messages
-        for message in st.session_state.messages:
+        for i, message in enumerate(st.session_state.messages):
             with st.chat_message(message["role"]):
                 if message.get("is_emotion", False):
                     # Render emotion badge
@@ -430,17 +453,17 @@ class UIStream:
                     # Render suggestions with HTML
                     st.markdown(message["content"], unsafe_allow_html=True)
                     
-                    # Add buttons for suggestions
-                    if "suggestions" in st.session_state and st.session_state.suggestions:
+                    # Only add buttons for the latest suggestions block
+                    if i == last_suggestions_index and "suggestions" in st.session_state and st.session_state.suggestions:
                         # Create a container for the buttons
                         cols = st.columns(2)
                         with cols[0]:
-                            if st.button("Choose 1", key="choose_suggestion_1", help="Choose the first suggestion", type="primary"):
+                            if st.button("Choose 1", key=f"choose_suggestion_1_{i}", help="Choose the first suggestion", type="primary"):
                                 self.handle_suggestion_choice(0)
                                 st.rerun()
                         with cols[1]:
                             if len(st.session_state.suggestions) > 1:
-                                if st.button("Choose 2", key="choose_suggestion_2", help="Choose the second suggestion", type="primary"):
+                                if st.button("Choose 2", key=f"choose_suggestion_2_{i}", help="Choose the second suggestion", type="primary"):
                                     self.handle_suggestion_choice(1)
                                     st.rerun()
                 else:
