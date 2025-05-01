@@ -7,6 +7,7 @@ from typing import Dict, List, Tuple, Optional, Any, Union
 import json
 import openai
 import logging
+import streamlit as st
 
 from emotion_api import EmotionAPI
 from graph_planner import EmotionGraph
@@ -152,23 +153,36 @@ class JourneyManager:
             Dictionary with progress data
         """
         if not self.current_emotion or not self.goal_emotion:
-            return {"progress": 0, "steps_remaining": 0, "total_steps": 0}
+            return {"progress": 0, "steps_remaining": 0, "total_steps": 2, "current_step": 0}
         
-        distance, path = self.graph.dijkstra(self.current_emotion, self.goal_emotion)
+        # Fixed 2-step journey regardless of actual path length
+        total_steps = 2
         
-        # Calculate and return progress
-        original_distance = len(self.path) if self.path else 0
-        if original_distance == 0:
-            progress = 100  # Already at goal
-        else:
-            steps_taken = original_distance - len(path) + 1
-            progress = min(100, int((steps_taken / original_distance) * 100))
+        # Check if we have chosen suggestions to determine progress
+        chosen_progress = 0
+        current_step = 1
+        
+        # Check if we have chosen suggestions in session state
+        if hasattr(st.session_state, 'chosen_suggestions') and st.session_state.chosen_suggestions:
+            # Get the last chosen suggestion's progress value
+            last_suggestion = st.session_state.chosen_suggestions[-1]
+            chosen_progress = last_suggestion.get('closer_percentage', 0)
+            
+            # If we've chosen at least one suggestion, we're at step 2
+            current_step = 2
+            
+            # If we've chosen more than one suggestion, we've completed the journey
+            if len(st.session_state.chosen_suggestions) > 1:
+                chosen_progress = 100
+                
+        # Calculate steps remaining
+        steps_remaining = total_steps - current_step + 1 if current_step <= total_steps else 0
         
         return {
-            "progress": progress,
-            "steps_remaining": len(path) - 1 if len(path) > 0 else 0,
-            "total_steps": original_distance,
-            "current_step": original_distance - len(path) + 1 if len(path) > 0 else original_distance
+            "progress": chosen_progress,
+            "steps_remaining": steps_remaining,
+            "total_steps": total_steps,
+            "current_step": current_step
         }
     
     def generate_suggestions(self, model: str = "gpt-4o") -> List[Dict[str, Any]]:
@@ -199,46 +213,65 @@ class JourneyManager:
         emotion_history = list(self.history)
         emotion_context = ", ".join(emotion_history[-3:]) if emotion_history else self.current_emotion
         
-        # Calculate progress increments based on total steps
-        total_steps = progress["total_steps"]
+        # Define fixed percentages based on current step
         current_step = progress["current_step"]
-        remaining_steps = progress["steps_remaining"]
         
-        # Faster progress percentage (bigger step)
-        faster_progress = min(85, progress["progress"] + int(100 / total_steps) * 2) if total_steps > 0 else 75
+        # First step: Options are 50% or 75% progress
+        # Second step: Options are both 25% to reach 100%
+        if current_step == 1:
+            faster_progress = 75  # First step, faster option
+            slower_progress = 50  # First step, slower option
+        else:
+            faster_progress = 100  # Second step, both reach 100%
+            slower_progress = 100
         
-        # Slower progress percentage (smaller step)
-        slower_progress = min(60, progress["progress"] + int(100 / total_steps)) if total_steps > 0 else 35
+        # Create step-specific instructions
+        step_instructions = ""
+        if current_step == 1:
+            step_instructions = """
+            - The first suggestion should provide a faster progress (75% towards goal)
+            - The second suggestion should provide a slower progress (50% towards goal)
+            - Both suggestions should be for the FIRST STEP in their emotional journey
+            """
+        else:
+            step_instructions = """
+            - Both suggestions should provide the FINAL 25% progress to reach the goal
+            - These are FINAL STEP suggestions that complete their emotional journey
+            - Each should have a distinct approach but both reach the goal
+            """
+        
+        # First/second option text based on step
+        first_title = "faster" if current_step == 1 else "first" 
+        second_title = "slower" if current_step == 1 else "second"
         
         # Create system prompt for suggestion generation
         system_prompt = f"""
         You are an emotional coach guiding someone from their current emotion ({self.current_emotion}) 
         to their goal emotion ({self.goal_emotion}).
         
-        The path to reach the goal is: {' -> '.join(self.path)}
-        They are currently at step {progress['current_step']} of {progress['total_steps']}.
+        The user is currently at step {progress['current_step']} of a 2-step journey.
         Their recent emotional state has been: {emotion_context}
         
         Generate two different emotional transition suggestions that could help them move from their current feeling
         toward their goal emotion. Each suggestion should focus on emotional shifts rather than specific actions.
         
         IMPORTANT: 
-        - The first suggestion should provide a faster progress toward the goal emotion ({faster_progress}% progress)
-        - The second suggestion should provide a slower but deeper progress ({slower_progress}% progress)
+        {step_instructions}
         - Focus on how they can internally shift their emotional state, not just external activities
         - Suggest emotional perspectives, reflections, or mindset shifts
         - Both suggestions should aim to help the person move toward feeling {self.goal_emotion}
         - Think about the emotional journey rather than just activities to do
+        - Adapt the style, tone, and imagery to match the target emotion ({self.goal_emotion})
         
         Respond with a JSON array of two suggestion objects in the following format:
         [
             {{
-                "title": "Short title for faster emotional suggestion",
+                "title": "Short title for {first_title} emotional suggestion",
                 "description": "Description of how this emotional perspective can help shift toward the goal emotion (1-2 sentences)",
                 "closer_percentage": {faster_progress}
             }},
             {{
-                "title": "Short title for deeper emotional suggestion",
+                "title": "Short title for {second_title} emotional suggestion",
                 "description": "Description of a deeper emotional approach toward the goal emotion (1-2 sentences)",
                 "closer_percentage": {slower_progress}
             }}
@@ -377,51 +410,52 @@ class JourneyManager:
         # Get current progress data
         progress = self.get_progress()
         
-        # Calculate progress increments based on total steps
-        total_steps = progress["total_steps"]
-        current_step = progress["current_step"]
-        remaining_steps = progress["steps_remaining"]
+        # For the second step, both suggestions complete the journey to 100%
+        faster_progress = 100  # Second step, both reach 100%
+        slower_progress = 100  # Second step, both reach 100%
         
-        # Faster progress percentage (bigger step)
-        faster_progress = min(85, progress["progress"] + int(100 / total_steps) * 2) if total_steps > 0 else 75
+        # Update context with current progress and chosen suggestion
+        full_context = f"{context} Just chose: {chosen_suggestion}."
         
-        # Slower progress percentage (smaller step)
-        slower_progress = min(60, progress["progress"] + int(100 / total_steps)) if total_steps > 0 else 35
+        # Get the last chosen suggestion's progress value 
+        chosen_progress = 0
+        if hasattr(st.session_state, 'chosen_suggestions') and st.session_state.chosen_suggestions:
+            last_suggestion = st.session_state.chosen_suggestions[-1]
+            chosen_progress = last_suggestion.get('closer_percentage', 0)
         
-        # Update context with current progress
-        full_context = f"{context} Current progress: {progress['progress']}%. Just chose: {chosen_suggestion}."
-        
-        # Create system prompt for suggestion generation
+        # Create system prompt for final suggestion generation
         system_prompt = f"""
         You are an emotional coach guiding someone on their journey from {self.current_emotion} to {self.goal_emotion}.
         
         Context of their journey so far: {full_context}
         
-        The user has just chosen: "{chosen_suggestion}"
+        The user has chosen a suggestion that brought them {chosen_progress}% of the way toward {self.goal_emotion}.
+        Now you need to provide the FINAL suggestions to complete their journey.
         
-        Generate two NEW and DIFFERENT emotional transition suggestions that build upon their choice and 
-        help them continue their journey toward {self.goal_emotion}.
+        Generate two NEW and DIFFERENT emotional transition suggestions that will take them from {chosen_progress}% to 100%.
         
         Your suggestions must:
         1. Be different from "{chosen_suggestion}" but complementary to it
         2. Feel like a natural next step after their choice
         3. Focus on emotional shifts and perspectives, not just actions
+        4. Complete their journey to reach {self.goal_emotion} fully
+        5. Adapt the style, tone, and imagery to match the target emotion ({self.goal_emotion})
         
         IMPORTANT: 
-        - The first suggestion should provide a faster progress toward the goal ({faster_progress}% progress)
-        - The second suggestion should provide a deeper but slower progress ({slower_progress}% progress)
-        - Both should be fresh ideas, not repeats of what they've already chosen
+        - Both suggestions should provide the final progress needed to reach 100%
+        - Both should be fresh ideas with different approaches to reach the same goal
+        - Each suggestion should have a distinct emotional tone or perspective
         
         Respond with a JSON array of two suggestion objects in the following format:
         [
             {{
-                "title": "Short title for faster emotional suggestion",
-                "description": "Description of how this new emotional perspective builds on their previous choice (1-2 sentences)",
+                "title": "Short title for first final step suggestion",
+                "description": "Description of how this final emotional perspective completes their journey (1-2 sentences)",
                 "closer_percentage": {faster_progress}
             }},
             {{
-                "title": "Short title for deeper emotional suggestion",
-                "description": "Description of a deeper emotional approach that complements their journey so far (1-2 sentences)",
+                "title": "Short title for second final step suggestion",
+                "description": "Description of an alternative final emotional approach (1-2 sentences)",
                 "closer_percentage": {slower_progress}
             }}
         ]

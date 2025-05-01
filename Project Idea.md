@@ -23,23 +23,27 @@ Users need a single-session emotional planner that listens to how they feel, hel
 ### 3. In-Scope Features (MVP)
 | #   | Feature                       | Description |
 |-----|-------------------------------|-------------|
-| F1  | **Guided Emotion Flow**       | Structured emotional journey:
-• Start with initial emotion assessment
-• Disable chat input during journey
-• Choose target positive emotion
-• Present step-by-step emotional suggestions
-• Re-enable chat upon reaching goal
+| F1  | **Guided Emotion Flow**       | Structured emotional journey with fixed 2-step progression:
+• Step 1: User shares initial emotion (detected as sadness)
+• Choose target positive emotion (e.g., surprise, love)
+• First suggestions: Two options (50% and 75% progress)
+• Second suggestions: Two options (remaining 25% to complete journey)
+• Re-enable chat upon reaching 100% progress
 |
 | F2  | **Streamed Chat UI**          | Use `st.chat_input()` & `st.empty()` containers to render progressive bubbles:  
 • **Emotion Badge** (emoji + label + color)  
-• **Goal Picker** (two neighbor emotions with hops count)  
-• **Suggestion Cards** (two options with "% closer" stats)  
+• **Goal Picker** (two neighbor emotions)  
+• **Suggestion Cards** (two options with specific progress %)
+• **Progress Bar** (visualizing overall journey progress)  
 | 
 | F3  | **Reset Chat**                | A "Reset" button clears all history, state, and returns to the initial prompt.  |
 | F4  | **Emotion Classification**    | Single GPT-4o call → JSON of 8 emotion scores → parse top emotion.  |
 | F5  | **Graph Planner**             | Adjacency-list graph + Dijkstra to compute neighbor hops and path lengths.  |
-| F6  | **Suggestion Generator**      | For chosen goal, generate two differently-paced emotional transition suggestions with varying progress potentials.  |
-| F7  | **State Management**          | `deque(maxlen=50)` holds current emotion history; reset clears this deque.  |
+| F6  | **Suggestion Generator**      | For chosen goal, generate two contextual suggestions with fixed progress percentages:
+• First step: 50% and 75% progress options
+• Second step: Remaining 25% to reach 100% goal
+|
+| F7  | **State Management**          | `deque(maxlen=50)` holds current emotion history; track chosen suggestions.  |
 | F8  | **Chat Control**              | Disable chat input during emotional journey; re-enable upon goal achievement.  |
 | F9  | **Local Cache**               | Prompt→response cache in-memory or SQLite to reduce rate-limit usage.  |
 | F10 | **Error Handling**            | Fallback goal or tip if GPT fails; message truncation; sanitize input.  |
@@ -69,27 +73,27 @@ Users need a single-session emotional planner that listens to how they feel, hel
 
 ### 6. Architecture & Guided Journey Pipeline
 ```text
-[User input] → [classify_emotion] → [disable_chat] → [choose_goal] → [generate_suggestions] → 
-[implement_suggestion] → [check_progress] → [if_goal_reached: enable_chat] → [display]
-                 ▲                                                                 ▲
-               Reset clears entire pipeline & history                              
+[User input] → [classify_emotion (sadness)] → [choose_goal (surprise)] → 
+[Step 1: 50%/75% suggestions] → [implement_suggestion] → [Step 2: 25%/25% suggestions] → 
+[implement_suggestion] → [goal_reached] → [enable_chat] → [display]
 ```  
 - **`emotion_api.py`** – wrap GPT-4o classification  
 - **`graph_planner.py`** – build graph, Dijkstra utilities  
-- **`journey_manager.py`** – orchestrate state, compute neighbors, progress tracking, GPT suggestions  
-- **`ui_stream.py`** – Streamlit streaming logic, chat control & reset button  
+- **`journey_manager.py`** – 2-step journey management, fixed progression, suggestion generation
+- **`ui_stream.py`** – Streamlit UI with color/emoji adaptation between steps
 - **`cache.py`** – simple prompt→response store  
 
 ---
 
 ### 7. Functional Requirements
 1. **R-1**: On initial user message, classify emotion, disable chat, and present goal options.
-2. **R-2**: Display two positive goal options (emoji + label + hops).  
-3. **R-3**: For selected goal, show two suggestions with varying progress potential.  
-4. **R-4**: Track user progress and only re-enable chat input when goal is reached.
-5. **R-5**: Provide a visible "Reset" button that clears chat history and resets state to start.  
-6. **R-6**: Fallback robust replies for any GPT/API errors or empty input.  
-7. **R-7**: Ensure history never exceeds 50 entries; reset resets count.  
+2. **R-2**: Display two positive goal options (emoji + label).  
+3. **R-3**: First step - show exactly two suggestions: one with 50% progress, one with 75%.
+4. **R-4**: Second step - show exactly two suggestions to complete remaining progress (25%).
+5. **R-5**: Match UI elements (colors, emojis, themes) to the step and target emotion.
+6. **R-6**: Track progress precisely: 50% or 75% for step 1, 25% for step 2 (to reach 100%).
+7. **R-7**: Re-enable chat input immediately after goal is reached (100% progress).
+8. **R-8**: Clear reset functionality with "Reset" button that resets all state.
 
 ---
 
@@ -103,7 +107,14 @@ Users need a single-session emotional planner that listens to how they feel, hel
 
 ### 9. Acceptance Criteria
 
-Running `streamlit run main.py` demonstrates a controlled emotional journey where the user transitions from initial expression → disabled chat → goal selection → incremental suggestions → goal achievement → chat re-enabled, with colors & emojis guiding each step.
+Running `streamlit run main.py` demonstrates a precisely controlled emotional journey where:
+1. User expresses problem → AI detects sadness
+2. User chooses a goal emotion (e.g., surprise)
+3. First step: AI offers two suggestions (50% and 75% progress)
+4. User chooses one suggestion
+5. Second step: AI offers two more suggestions to complete the journey
+6. User chooses final suggestion
+7. Goal reached (100%) → AI congratulates and chat is re-enabled
 
 ---
 

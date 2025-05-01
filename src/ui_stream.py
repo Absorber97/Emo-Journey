@@ -202,25 +202,49 @@ class UIStream:
         # Use suggestion specific progress percentage
         closer_percentage = suggestion['closer_percentage']
         
-        # Choose different emojis based on closer_percentage
-        if closer_percentage >= 70:
-            progress_emoji = "🚀"  # Rocket for big jumps
-        elif closer_percentage >= 50:
-            progress_emoji = "✨"  # Sparkles for medium progress
-        elif closer_percentage >= 30:
-            progress_emoji = "🔍"  # Magnifying glass for smaller progress
-        else:
-            progress_emoji = "🌱"  # Seedling for minimal progress
+        # Get goal emotion for contextual styling
+        goal_emotion = st.session_state.goal_emotion if "goal_emotion" in st.session_state else ""
+        current_emotion = st.session_state.current_emotion if "current_emotion" in st.session_state else ""
         
-        # Different color schemes based on closer_percentage
-        if closer_percentage >= 70:
-            color = "#2E7D32"  # Dark green for big progress
-        elif closer_percentage >= 50:
-            color = "#5C6BC0"  # Indigo for medium progress
-        elif closer_percentage >= 30:
-            color = "#FF9800"  # Orange for smaller progress
-        else:
-            color = "#9E9E9E"  # Grey for minimal progress
+        # Calculate the journey step (1 or 2)
+        current_step = progress.get('current_step', 1)
+        
+        # Create emoji and color map based on goal emotion and step
+        emoji_map = {
+            "joy": ["✨", "🌟"] if current_step == 1 else ["🎉", "🎊"],
+            "surprise": ["✨", "🚀"] if current_step == 1 else ["😲", "🎯"],
+            "love": ["💫", "💖"] if current_step == 1 else ["❤️", "💕"],
+            "fear": ["🌱", "🔍"] if current_step == 1 else ["🦋", "🕊️"],
+            "anger": ["🌊", "💪"] if current_step == 1 else ["🔥", "⚡"],
+            "trust": ["🤲", "🌈"] if current_step == 1 else ["🤝", "🌟"],
+            "anticipation": ["👀", "🔭"] if current_step == 1 else ["🎯", "🏹"],
+            "disgust": ["🧪", "🧹"] if current_step == 1 else ["🌿", "🌱"],
+        }
+        
+        # Get step-specific emojis based on emotion
+        emotion_emojis = emoji_map.get(goal_emotion, ["✨", "🌟"] if current_step == 1 else ["🎯", "🎉"])
+        
+        # Select emoji based on index and add variety between steps
+        progress_emoji = emotion_emojis[index % len(emotion_emojis)]
+        
+        # Create color map based on goal emotion and step
+        color_map = {
+            "joy": ["#FFD54F", "#FFA726"] if current_step == 1 else ["#FFB300", "#FB8C00"],
+            "surprise": ["#4DB6AC", "#26A69A"] if current_step == 1 else ["#00897B", "#00796B"],
+            "love": ["#F48FB1", "#EC407A"] if current_step == 1 else ["#E91E63", "#D81B60"],
+            "fear": ["#9575CD", "#7E57C2"] if current_step == 1 else ["#673AB7", "#5E35B1"],
+            "anger": ["#EF9A9A", "#EF5350"] if current_step == 1 else ["#E53935", "#D32F2F"],
+            "sadness": ["#90CAF9", "#42A5F5"] if current_step == 1 else ["#1E88E5", "#1976D2"],
+            "trust": ["#81D4FA", "#29B6F6"] if current_step == 1 else ["#039BE5", "#0288D1"],
+            "anticipation": ["#FFCC80", "#FFA726"] if current_step == 1 else ["#FB8C00", "#F57C00"],
+            "disgust": ["#A5D6A7", "#66BB6A"] if current_step == 1 else ["#43A047", "#388E3C"],
+        }
+        
+        # Get step-specific colors based on emotion
+        emotion_colors = color_map.get(goal_emotion, ["#78909C", "#607D8B"] if current_step == 1 else ["#546E7A", "#455A64"])
+        
+        # Select color based on index and percentage
+        color = emotion_colors[index % len(emotion_colors)]
         
         # Check if this suggestion has been chosen
         is_chosen = suggestion.get('chosen', False) or suggestion_id in st.session_state.implemented_suggestions
@@ -234,6 +258,12 @@ class UIStream:
             background_color = "#f8f9fa"  # Default background
             border_style = f"border-left: 8px solid {color};"
             chosen_badge = ""
+        
+        # Format progress label based on step
+        if current_step == 1:
+            progress_label = f"{closer_percentage}% progress"
+        else:
+            progress_label = "Final Step"
         
         return f"""
         <div id="{suggestion_id}_container" style="
@@ -256,7 +286,7 @@ class UIStream:
                     font-size: 0.9em;
                     float: right;
                     font-weight: bold;
-                ">{closer_percentage}% closer</span>
+                ">{progress_label}</span>
             </h4>
             <p style="margin: 0; font-size: 1.05em; color: #333333;">{suggestion['description']}</p>
         </div>
@@ -277,6 +307,21 @@ class UIStream:
         goal_emotion = st.session_state.goal_emotion
         goal_emoji = self.journey_manager.emotion_api.EMOTIONS.get(goal_emotion, "❓")
         goal_color = self.journey_manager.emotion_api.EMOTION_COLORS.get(goal_emotion, "#808080")
+        current_emotion = st.session_state.current_emotion
+        
+        # Adapt heading based on current progress step
+        current_step = progress.get('current_step', 1)
+        total_steps = progress.get('total_steps', 2)
+        progress_percentage = progress.get('progress', 0)
+        
+        # Create a header that changes based on progress
+        if current_step == 1:
+            header_text = f"Working towards {goal_emoji} <strong>{goal_emotion.capitalize()}</strong> - Step 1 of 2"
+        else:
+            header_text = f"Final step towards {goal_emoji} <strong>{goal_emotion.capitalize()}</strong>"
+        
+        # Progress bar styling
+        progress_width = f"{progress_percentage}%"
         
         suggestions_html = f"""
         <div style="
@@ -297,12 +342,32 @@ class UIStream:
                 align-items: center;
                 justify-content: space-between;
             ">
-                <span>Working towards {goal_emoji} <strong>{goal_emotion.capitalize()}</strong></span>
+                <span>{header_text}</span>
+            </div>
+            
+            <div style="
+                width: 100%;
+                height: 6px;
+                background-color: #e0e0e0;
+                border-radius: 3px;
+                margin-bottom: 15px;
+            ">
+                <div style="
+                    width: {progress_width};
+                    height: 100%;
+                    background-color: {goal_color};
+                    border-radius: 3px;
+                    transition: width 0.5s ease;
+                "></div>
             </div>
         """
         
         if suggestions:
-            suggestions_html += "<p>Here are some suggestions:</p>"
+            if current_step == 1:
+                suggestions_html += "<p>Choose how you'd like to begin your journey:</p>"
+            else:
+                suggestions_html += "<p>Choose your final step to reach your goal:</p>"
+            
             for i, suggestion in enumerate(suggestions):
                 suggestions_html += self.format_suggestion(suggestion, i, progress)
         else:
@@ -340,10 +405,6 @@ class UIStream:
             # Mark this suggestion as implemented
             st.session_state.implemented_suggestions.add(suggestion_id)
             
-            # Update progress based on suggestion's closer_percentage
-            progress_before = self.journey_manager.get_progress()
-            closer_percentage = suggestion.get('closer_percentage', 0)
-            
             # Add a "Chosen" badge to the chosen suggestion
             chosen_suggestion = {
                 'title': suggestion['title'],
@@ -357,58 +418,79 @@ class UIStream:
                 st.session_state.chosen_suggestions = []
             st.session_state.chosen_suggestions.append(chosen_suggestion)
             
-            # Simulate progress in the journey based on the suggestion's closer_percentage
-            goal_reached = closer_percentage >= 95 or progress_before['progress'] + 30 >= 100
+            # Get progress before and after choosing suggestion
+            progress_before = self.journey_manager.get_progress()
+            closer_percentage = suggestion.get('closer_percentage', 0)
             
-            # If goal is reached, notify journey manager
-            if goal_reached:
-                logger.info(f"Goal reached through suggestion implementation: {st.session_state.goal_emotion}")
-                
-                # Set current emotion to goal emotion to trigger congratulations
-                self.journey_manager.current_emotion = self.journey_manager.goal_emotion
-                
-                # Add a response acknowledging the achievement
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": f"Great choice! You've successfully reached your goal of feeling {st.session_state.goal_emotion}!",
-                    "is_emotion": False
-                })
-                
-                # Re-enable chat
-                st.session_state.chat_disabled = False
-            else:
-                # Generate fresh suggestions based on the chosen suggestion
-                time.sleep(0.7)  # Brief pause for better UX
-                
-                # Get progress
+            # Check if this is the first or second step
+            is_first_step = len(st.session_state.chosen_suggestions) == 1
+            
+            if is_first_step:
+                # First step chosen - proceed to the second step
+                # Get progress for display
                 progress = self.journey_manager.get_progress()
                 
-                # Provide context based on what the user has chosen so far
+                # Provide context based on what the user has chosen
                 context = self._build_suggestion_context()
                 
-                # Generate completely new suggestions that build on the chosen path
+                # Generate the second step suggestions
                 suggestions = self.journey_manager.generate_fresh_suggestions(
                     context=context,
                     chosen_suggestion=suggestion['title']
                 )
                 st.session_state.suggestions = suggestions
                 
-                # Add response message acknowledging the choice
+                # Add response message acknowledging the first step choice
+                progress_msg = "75%" if closer_percentage == 75 else "50%"
                 st.session_state.messages.append({
                     "role": "assistant",
-                    "content": f"Good choice! Let's continue your journey toward {st.session_state.goal_emotion} with some fresh perspectives.",
+                    "content": f"Good choice! You've made {progress_msg} progress toward {st.session_state.goal_emotion}. Now let's take the final step to complete your journey.",
                     "is_emotion": False
                 })
                 
-                # Format suggestions
+                # Format suggestions for the second step
                 suggestions_html = self._format_suggestions_html(suggestions, progress)
                 
-                # Add suggestions to chat history
+                # Add second step suggestions to chat history
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": suggestions_html,
                     "is_suggestions": True
                 })
+            else:
+                # Second step chosen - journey complete
+                logger.info(f"Goal reached through second suggestion: {st.session_state.goal_emotion}")
+                
+                # Set current emotion to goal emotion to trigger congratulations
+                self.journey_manager.current_emotion = self.journey_manager.goal_emotion
+                
+                # Add congratulatory message
+                emotion = st.session_state.goal_emotion
+                emoji = self.journey_manager.emotion_api.EMOTIONS.get(emotion, "❓")
+                color = self.journey_manager.emotion_api.EMOTION_COLORS.get(emotion, "#808080")
+                
+                # Format the congratulations
+                congrats_message = self._format_goal_reached_message(emotion, emoji, color)
+                
+                # Add journey completion message
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"Excellent! You've successfully completed your journey and reached {emotion}! {emoji}",
+                    "is_emotion": False
+                })
+                
+                # Add detailed congratulations
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": congrats_message,
+                    "is_congrats": True
+                })
+                
+                # Re-enable chat
+                st.session_state.chat_disabled = False
+                
+                # Reset goal but keep current emotion
+                self.journey_manager.reset_goal()
     
     def _build_suggestion_context(self):
         """Build context string based on user's emotional journey so far."""

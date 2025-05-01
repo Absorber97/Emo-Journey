@@ -19,19 +19,35 @@ class EmotionAPI:
         "disgust": "🤢",
         "surprise": "😲",
         "trust": "🤝",
-        "anticipation": "🔍"
+        "anticipation": "🔍",
+        "love": "❤️",
+        "curiosity": "🧐",
+        "amusement": "😏",
+        "confusion": "😕",
+        "hope": "🌈",
+        "gratitude": "🙏",
+        "excitement": "🤩",
+        "serenity": "🧘‍♀️"
     }
     
-    # Color mapping for emotions
+    # Color mapping for emotions - using more vibrant and adaptive colors
     EMOTION_COLORS = {
-        "joy": "#FFD700",         # Gold
-        "sadness": "#6495ED",     # CornflowerBlue
-        "anger": "#FF4500",       # OrangeRed
-        "fear": "#800080",        # Purple
-        "disgust": "#008000",     # Green
-        "surprise": "#FF69B4",    # HotPink
-        "trust": "#1E90FF",       # DodgerBlue
-        "anticipation": "#FFA500" # Orange
+        "joy": "#FFC107",           # Amber
+        "sadness": "#78909C",       # Blue Grey
+        "anger": "#EF5350",         # Red
+        "fear": "#7E57C2",          # Deep Purple
+        "disgust": "#26A69A",       # Teal
+        "surprise": "#26A69A",      # Teal
+        "trust": "#42A5F5",         # Blue
+        "anticipation": "#FF9800",  # Orange
+        "love": "#EC407A",          # Pink
+        "curiosity": "#00BCD4",     # Cyan
+        "amusement": "#8BC34A",     # Light Green
+        "confusion": "#9C27B0",     # Purple
+        "hope": "#4CAF50",          # Green
+        "gratitude": "#CDDC39",     # Lime
+        "excitement": "#FF5722",    # Deep Orange
+        "serenity": "#03A9F4"       # Light Blue
     }
     
     def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o"):
@@ -87,7 +103,11 @@ class EmotionAPI:
             )
             
             # Parse the response
-            result = json.loads(response.choices[0].message.content)
+            content = response.choices[0].message.content
+            if content is None:
+                raise ValueError("Empty response from OpenAI API")
+            
+            result = json.loads(content)
             emotion = result["emotion"].lower()
             confidence = result["confidence"]
             

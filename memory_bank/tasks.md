@@ -29,6 +29,10 @@
 - [x] Implement robust JSON parsing for suggestions with multiple fallback options
 - [x] Add graceful handling of empty suggestions with helpful defaults
 - [x] Refactor UI code to reduce duplication
+- [x] Implement fixed 2-step emotional journey with precise progress percentages
+- [x] Standardize first step options to 50% and 75% progress
+- [x] Standardize second step options to provide final 25% progress (to 100%)
+- [x] Make colors, emojis, and suggestions adapt based on step and target emotion
 
 ## Final User Experience Improvements
 
@@ -48,17 +52,21 @@
 - [x] Fix text contrast issues for better readability
 - [x] Implement progress flow after suggestion implementation
 - [x] Add implementation state tracking and visualization
+- [x] Add progress bar to visualize emotional journey steps
+- [x] Implement step-specific UI adaptations with matching themes
+- [x] Customize progress labels based on journey step
 
 ## UI and Guidance Refinement
 
 - [x] Remove duplicate implementation buttons
 - [x] Use distinct visual styling for different suggestions
-- [x] Apply different color schemes and emojis based on suggestion type
+- [x] Apply different color schemes and emojis based on suggestion type and journey phase
 - [x] Improve suggestion content to target specific emotions
 - [x] Provide quick path and deeper journey options
 - [x] Rename action buttons for clarity
 - [x] Update suggestions to guide users toward target emotion
 - [x] Enhance suggestion system prompt for better AI guidance
+- [x] Adapt UI text based on journey progress step
 
 ## Interaction Flow Optimization
 
