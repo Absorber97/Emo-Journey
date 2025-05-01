@@ -195,6 +195,21 @@ class JourneyManager:
             logger.info(f"Using cached suggestions for {self.current_emotion} -> {self.goal_emotion}")
             return cached_suggestions
         
+        # Get context from emotion history
+        emotion_history = list(self.history)
+        emotion_context = ", ".join(emotion_history[-3:]) if emotion_history else self.current_emotion
+        
+        # Calculate progress increments based on total steps
+        total_steps = progress["total_steps"]
+        current_step = progress["current_step"]
+        remaining_steps = progress["steps_remaining"]
+        
+        # Faster progress percentage (bigger step)
+        faster_progress = min(85, progress["progress"] + int(100 / total_steps) * 2) if total_steps > 0 else 75
+        
+        # Slower progress percentage (smaller step)
+        slower_progress = min(60, progress["progress"] + int(100 / total_steps)) if total_steps > 0 else 35
+        
         # Create system prompt for suggestion generation
         system_prompt = f"""
         You are an emotional coach guiding someone from their current emotion ({self.current_emotion}) 
@@ -202,31 +217,32 @@ class JourneyManager:
         
         The path to reach the goal is: {' -> '.join(self.path)}
         They are currently at step {progress['current_step']} of {progress['total_steps']}.
+        Their recent emotional state has been: {emotion_context}
         
-        Generate two different practical suggestions that could help them move closer to their goal emotion.
-        Each suggestion should be actionable and specific.
+        Generate two different emotional transition suggestions that could help them move from their current feeling
+        toward their goal emotion. Each suggestion should focus on emotional shifts rather than specific actions.
         
-        IMPORTANT: The first suggestion should be a quicker path (higher percentage closer),
-        while the second should be a deeper but slower approach (lower percentage closer).
-        
-        Make both suggestions specifically designed to help the person feel their target emotion ({self.goal_emotion}).
+        IMPORTANT: 
+        - The first suggestion should provide a faster progress toward the goal emotion ({faster_progress}% progress)
+        - The second suggestion should provide a slower but deeper progress ({slower_progress}% progress)
+        - Focus on how they can internally shift their emotional state, not just external activities
+        - Suggest emotional perspectives, reflections, or mindset shifts
+        - Both suggestions should aim to help the person move toward feeling {self.goal_emotion}
+        - Think about the emotional journey rather than just activities to do
         
         Respond with a JSON array of two suggestion objects in the following format:
         [
             {{
-                "title": "Short title for quicker suggestion",
-                "description": "Detailed description of quicker suggestion (1-2 sentences)",
-                "closer_percentage": higher_percentage_closer
+                "title": "Short title for faster emotional suggestion",
+                "description": "Description of how this emotional perspective can help shift toward the goal emotion (1-2 sentences)",
+                "closer_percentage": {faster_progress}
             }},
             {{
-                "title": "Short title for deeper suggestion",
-                "description": "Detailed description of deeper suggestion (1-2 sentences)",
-                "closer_percentage": lower_percentage_closer
+                "title": "Short title for deeper emotional suggestion",
+                "description": "Description of a deeper emotional approach toward the goal emotion (1-2 sentences)",
+                "closer_percentage": {slower_progress}
             }}
         ]
-        
-        Where percentage_closer is an estimate (10-95) of how much closer this suggestion
-        might bring them to the next emotion in the path.
         """
         
         try:
@@ -289,24 +305,15 @@ class JourneyManager:
                 if len(suggestions) < 2:
                     logger.warning(f"Only {len(suggestions)} suggestions found, adding fallback suggestion")
                     suggestions.append({
-                        "title": "Try something new",
-                        "description": f"Do something unexpected that might bring you closer to feeling {self.goal_emotion}.",
-                        "closer_percentage": 20
+                        "title": "Take a deeper emotional journey",
+                        "description": f"Take a moment to reflect on times when you've felt {self.goal_emotion} before and what triggered those feelings.",
+                        "closer_percentage": slower_progress
                     })
                 
-                # Validate and enhance the suggestions
-                for suggestion in suggestions:
-                    if "closer_percentage" not in suggestion:
-                        suggestion["closer_percentage"] = 25  # Default value
-                    elif not isinstance(suggestion["closer_percentage"], int):
-                        # Try to convert to int if it's a string
-                        try:
-                            suggestion["closer_percentage"] = int(suggestion["closer_percentage"])
-                        except (ValueError, TypeError):
-                            suggestion["closer_percentage"] = 25
-                    
-                    # Ensure percentage is in valid range
-                    suggestion["closer_percentage"] = max(10, min(95, suggestion["closer_percentage"]))
+                # Ensure correct closer_percentage values
+                if len(suggestions) >= 2:
+                    suggestions[0]["closer_percentage"] = faster_progress
+                    suggestions[1]["closer_percentage"] = slower_progress
                 
                 # Cache the validated suggestions
                 emotion_cache.set(cache_key, suggestions)
@@ -322,27 +329,19 @@ class JourneyManager:
             logger.error(f"Error generating suggestions: {e}")
             # Return fallback suggestions that are tailored to the specific emotion journey
             if self.current_emotion and self.goal_emotion:
-                next_step = ""
-                if self.path and len(self.path) > 1:
-                    current_index = self.path.index(self.current_emotion) if self.current_emotion in self.path else 0
-                    if current_index + 1 < len(self.path):
-                        next_step = self.path[current_index + 1]
-                
-                # First suggestion is for a quicker path to the target emotion
+                # Create emotion-focused suggestions with different progress potentials
                 suggestions = [
                     {
-                        "title": f"Quick shift to {self.goal_emotion}",
-                        "description": f"Deliberately seek out content that triggers {self.goal_emotion} - watch a surprising video or ask a friend to tell you something unexpected.",
-                        "closer_percentage": 45
+                        "title": f"Immediate shift toward {self.goal_emotion}",
+                        "description": f"Recall a powerful memory that made you feel {self.goal_emotion} and immerse yourself in that emotional memory right now.",
+                        "closer_percentage": faster_progress
+                    },
+                    {
+                        "title": f"Gradual transition from {self.current_emotion}",
+                        "description": f"Accept your current feeling of {self.current_emotion} while gently opening yourself to the possibility of experiencing {self.goal_emotion} soon.",
+                        "closer_percentage": slower_progress
                     }
                 ]
-                
-                # Second suggestion is for a longer but more enriching path
-                suggestions.append({
-                    "title": f"Deeper emotional journey",
-                    "description": f"Start a journal where you explore your current {self.current_emotion} and then gradually introduce elements that might lead to {self.goal_emotion}.",
-                    "closer_percentage": 30
-                })
                 
                 logger.info(f"Using fallback suggestions for {self.current_emotion} -> {self.goal_emotion}")
                 return suggestions
@@ -350,14 +349,14 @@ class JourneyManager:
             # Generic fallback if we don't have emotion data
             return [
                 {
-                    "title": "Reflect on your emotions",
-                    "description": "Take a moment to identify and acknowledge what you're feeling right now without judgment.",
-                    "closer_percentage": 30
+                    "title": "Quick emotional perspective shift",
+                    "description": "Consciously shift your attention to positive aspects of your current situation that might trigger a sense of hope or optimism.",
+                    "closer_percentage": 60
                 },
                 {
-                    "title": "Try a new perspective",
-                    "description": "Consider looking at your situation from a different angle or through someone else's eyes.",
-                    "closer_percentage": 25
+                    "title": "Emotional acceptance practice",
+                    "description": "Notice your current feeling without judgment, allowing it to exist while gently opening to the possibility of a gradual emotional shift.",
+                    "closer_percentage": 30
                 }
             ]
     

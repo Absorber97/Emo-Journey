@@ -67,6 +67,9 @@ class UIStream:
         if "implemented_suggestions" not in st.session_state:
             st.session_state.implemented_suggestions = set()
         
+        if "chat_disabled" not in st.session_state:
+            st.session_state.chat_disabled = False
+        
         self.journey_manager = st.session_state.journey_manager
     
     def reset_chat(self):
@@ -79,6 +82,7 @@ class UIStream:
         st.session_state.suggestions = []
         st.session_state.show_goal_buttons = False
         st.session_state.implemented_suggestions = set()
+        st.session_state.chat_disabled = False
         self.journey_manager.reset()
         
         # Add welcome message
@@ -136,10 +140,13 @@ class UIStream:
             st.session_state.goal_emotion = selected_goal
             st.session_state.show_goal_buttons = False
             
+            # Ensure chat remains disabled during goal journey
+            st.session_state.chat_disabled = True
+            
             # Add selected goal message
             st.session_state.messages.append({
                 "role": "assistant",
-                "content": f"You've chosen to work towards **{selected_goal}** {emoji}. Let me help you with that.",
+                "content": f"You've chosen to work towards **{selected_goal}** {emoji}. I'll guide you step by step with suggestions to help you reach this emotional state.",
                 "is_emotion": False
             })
             
@@ -192,54 +199,28 @@ class UIStream:
         # Generate a unique ID for this suggestion
         suggestion_id = f"suggestion_{index}_{hash(suggestion['title'])}"[:20]
         
-        # Use the overall progress percentage for consistency
-        journey_progress = progress['progress']
+        # Use suggestion specific progress percentage
+        closer_percentage = suggestion['closer_percentage']
         
-        # Choose different emojis based on index to ensure variety
-        if index == 0:
-            # First suggestion uses regular progress emojis
-            percentage = suggestion['closer_percentage']
-            if percentage >= 75:
-                progress_emoji = "🚀"  # Rocket for big jump
-            elif percentage >= 50:
-                progress_emoji = "⏩"  # Fast forward
-            elif percentage >= 25:
-                progress_emoji = "👣"  # Footsteps
-            else:
-                progress_emoji = "🌱"  # Small growth
+        # Choose different emojis based on closer_percentage
+        if closer_percentage >= 70:
+            progress_emoji = "🚀"  # Rocket for big jumps
+        elif closer_percentage >= 50:
+            progress_emoji = "✨"  # Sparkles for medium progress
+        elif closer_percentage >= 30:
+            progress_emoji = "🔍"  # Magnifying glass for smaller progress
         else:
-            # Second suggestion uses different emojis
-            percentage = suggestion['closer_percentage']
-            if percentage >= 75:
-                progress_emoji = "✨"  # Sparkles for big impact
-            elif percentage >= 50:
-                progress_emoji = "🔄"  # Cycle for change
-            elif percentage >= 25:
-                progress_emoji = "🔍"  # Magnifying glass for discovery
-            else:
-                progress_emoji = "🧩"  # Puzzle piece for exploration
+            progress_emoji = "🌱"  # Seedling for minimal progress
         
-        # Different color schemes based on index
-        if index == 0:
-            # First suggestion uses green scheme
-            if percentage >= 75:
-                color = "#2E7D32"  # Dark green
-            elif percentage >= 50:
-                color = "#4CAF50"  # Medium green
-            elif percentage >= 25:
-                color = "#8BC34A"  # Light green
-            else:
-                color = "#C5E1A5"  # Very light green
+        # Different color schemes based on closer_percentage
+        if closer_percentage >= 70:
+            color = "#2E7D32"  # Dark green for big progress
+        elif closer_percentage >= 50:
+            color = "#5C6BC0"  # Indigo for medium progress
+        elif closer_percentage >= 30:
+            color = "#FF9800"  # Orange for smaller progress
         else:
-            # Second suggestion uses blue/purple scheme
-            if percentage >= 75:
-                color = "#303F9F"  # Dark indigo
-            elif percentage >= 50:
-                color = "#5C6BC0"  # Medium indigo
-            elif percentage >= 25:
-                color = "#9FA8DA"  # Light indigo
-            else:
-                color = "#C5CAE9"  # Very light indigo
+            color = "#9E9E9E"  # Grey for minimal progress
         
         # Check if this suggestion has been implemented
         is_implemented = suggestion_id in st.session_state.implemented_suggestions
@@ -249,12 +230,10 @@ class UIStream:
             background_color = "#f0f8ff"  # Light blue background for implemented
             border_style = "border-left: 8px solid #90caf9; opacity: 0.7;"
             implemented_badge = '<span style="background-color: #90caf9; color: #fff; padding: 3px 8px; border-radius: 10px; font-size: 0.8em; margin-left: 10px;">✓ Chosen</span>'
-            button_style = "display: none;"
         else:
             background_color = "#f8f9fa"  # Default background
             border_style = f"border-left: 8px solid {color};"
             implemented_badge = ""
-            button_style = ""
         
         return f"""
         <div id="{suggestion_id}_container" style="
@@ -277,21 +256,9 @@ class UIStream:
                     font-size: 0.9em;
                     float: right;
                     font-weight: bold;
-                ">{percentage}% closer</span>
+                ">{closer_percentage}% closer</span>
             </h4>
             <p style="margin: 0; font-size: 1.05em; color: #333333;">{suggestion['description']}</p>
-            <div style="text-align: right; margin-top: 12px; {button_style}">
-                <button onclick="document.getElementById('{suggestion_id}_button').click();" style="
-                    background-color: {color};
-                    color: white;
-                    border: none;
-                    padding: 8px 15px;
-                    border-radius: 5px;
-                    cursor: pointer;
-                    font-weight: bold;
-                    font-size: 0.9em;
-                ">Choose</button>
-            </div>
         </div>
         """
     
@@ -381,15 +348,61 @@ class UIStream:
             # Mark this suggestion as implemented
             st.session_state.implemented_suggestions.add(suggestion_id)
             
-            # Get current progress
-            progress = self.journey_manager.get_progress()
+            # Update progress based on suggestion's closer_percentage
+            progress_before = self.journey_manager.get_progress()
             
-            # Add a response acknowledging the choice
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": f"Great choice! That should help you move closer to feeling {st.session_state.goal_emotion}. How do you feel now?",
-                "is_emotion": False
-            })
+            # Apply the suggestion's progress boost - this is simulated since we don't have a real simulation
+            # In a real emotional journey, we would update the journey manager with actual progress
+            # For now, we'll check if the suggestion gets us to the goal
+            closer_percentage = suggestion.get('closer_percentage', 0)
+            goal_reached = closer_percentage >= 95 or progress_before['progress'] + 30 >= 100
+            
+            # If goal is reached, notify journey manager
+            if goal_reached:
+                logger.info(f"Goal reached through suggestion implementation: {st.session_state.goal_emotion}")
+                
+                # Set current emotion to goal emotion to trigger congratulations
+                self.journey_manager.current_emotion = self.journey_manager.goal_emotion
+                
+                # Add a response acknowledging the achievement
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"Great choice! You've successfully reached your goal of feeling {st.session_state.goal_emotion}!",
+                    "is_emotion": False
+                })
+                
+                # Re-enable chat
+                st.session_state.chat_disabled = False
+            else:
+                # Add a response acknowledging the choice and encouraging next step
+                progress_after = self.journey_manager.get_progress()
+                
+                # Add response message
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"Good choice! You're making progress toward feeling {st.session_state.goal_emotion}. Let's continue with another suggestion.",
+                    "is_emotion": False
+                })
+                
+                # Get new suggestions
+                time.sleep(0.7)  # Brief pause for better UX
+                
+                # Get progress
+                progress = self.journey_manager.get_progress()
+                
+                # Get suggestions
+                suggestions = self.journey_manager.generate_suggestions()
+                st.session_state.suggestions = suggestions
+                
+                # Format suggestions
+                suggestions_html = self._format_suggestions_html(suggestions, progress)
+                
+                # Add suggestions to chat history
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": suggestions_html,
+                    "is_suggestions": True
+                })
     
     def render_chat_ui(self):
         """Render the main chat UI with messages and input."""
@@ -417,15 +430,18 @@ class UIStream:
                     # Render suggestions with HTML
                     st.markdown(message["content"], unsafe_allow_html=True)
                     
-                    # Add invisible buttons for suggestions
+                    # Add buttons for suggestions
                     if "suggestions" in st.session_state and st.session_state.suggestions:
-                        # Create a container for the hidden buttons
-                        with st.container():
-                            for i, suggestion in enumerate(st.session_state.suggestions):
-                                suggestion_id = f"suggestion_{i}_{hash(suggestion['title'])}"[:20]
-                                # Create a unique button for each suggestion
-                                if st.button("Choose", key=suggestion_id + "_button", help="Click to choose this suggestion", type="secondary", use_container_width=False):
-                                    self.handle_suggestion_choice(i)
+                        # Create a container for the buttons
+                        cols = st.columns(2)
+                        with cols[0]:
+                            if st.button("Choose 1", key="choose_suggestion_1", help="Choose the first suggestion", type="primary"):
+                                self.handle_suggestion_choice(0)
+                                st.rerun()
+                        with cols[1]:
+                            if len(st.session_state.suggestions) > 1:
+                                if st.button("Choose 2", key="choose_suggestion_2", help="Choose the second suggestion", type="primary"):
+                                    self.handle_suggestion_choice(1)
                                     st.rerun()
                 else:
                     # Render regular message
@@ -485,18 +501,31 @@ class UIStream:
                             self.select_goal(i)
                             st.rerun()
         
-        # Chat input
-        if prompt := st.chat_input("How are you feeling?"):
-            logger.info(f"User input: {prompt[:50]}...")
-            # Add user message to chat
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            
-            # Display user message in UI
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            
-            # Process the message
-            self.process_user_message(prompt)
+        # Display journey status message if chat is disabled
+        if st.session_state.chat_disabled and st.session_state.goal_emotion:
+            with st.container():
+                st.info(f"Chat input is disabled while you work towards {st.session_state.goal_emotion}. Choose a suggestion to continue your emotional journey.")
+        
+        # Chat input - conditionally enabled
+        if st.session_state.chat_disabled:
+            # Display disabled chat input
+            st.text_input("How are you feeling?", 
+                         value="Chat disabled during emotional journey", 
+                         disabled=True,
+                         key="disabled_chat_input")
+        else:
+            # Normal chat input functionality
+            if prompt := st.chat_input("How are you feeling?"):
+                logger.info(f"User input: {prompt[:50]}...")
+                # Add user message to chat
+                st.session_state.messages.append({"role": "user", "content": prompt})
+                
+                # Display user message in UI
+                with st.chat_message("user"):
+                    st.markdown(prompt)
+                
+                # Process the message
+                self.process_user_message(prompt)
     
     def process_user_message(self, message: str):
         """
@@ -572,6 +601,9 @@ class UIStream:
                     st.session_state.goal_emotion = None
                     st.session_state.show_goal_buttons = True
                     
+                    # Re-enable chat since goal was reached
+                    st.session_state.chat_disabled = False
+                    
                     # Get new goal options for next journey
                     goal_options = self.journey_manager.get_goal_options(n=2)
                     st.session_state.goal_options = goal_options
@@ -583,6 +615,16 @@ class UIStream:
                 elif not st.session_state.goal_emotion:
                     log_state("No goal set, showing goal options")
                     time.sleep(0.5)  # Brief pause for better UX
+                    
+                    # Disable chat during goal selection
+                    st.session_state.chat_disabled = True
+                    
+                    # Show instructions for goal selection
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": "I'll help you work toward a positive emotion. Please select which emotion you'd like to reach:",
+                        "is_emotion": False
+                    })
                     
                     # Get goal options
                     goal_options = self.journey_manager.get_goal_options(n=2)
