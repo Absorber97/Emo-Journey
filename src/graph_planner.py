@@ -199,6 +199,7 @@ class EmotionGraph:
     def get_closest_emotions(self, current: str, n: int = 2) -> List[Tuple[str, Union[int, float], List[str]]]:
         """
         Get the n closest emotions to reach from current.
+        Ensures a minimum of 2 steps for any emotional journey.
         
         Args:
             current: Current emotion
@@ -209,6 +210,25 @@ class EmotionGraph:
             Distance can be int or float('inf') if no path exists
         """
         emotion_steps = self.get_emotion_steps(current)
+        
+        # Enforce minimum of 2 steps for any emotional journey
+        for emotion, (distance, path) in emotion_steps.items():
+            # If path is too short (1 step), artificially extend it
+            if distance == 1 or (path and len(path) <= 2):
+                # Set to at least 2 steps
+                modified_distance = max(2, distance)
+                # Create a modified path if needed
+                if path and len(path) <= 2:
+                    # If direct path (just start->end), add intermediary
+                    # We'll duplicate the end emotion to make a 3-node path
+                    if len(path) == 2:
+                        modified_path = path[:-1] + [path[-1], path[-1]]
+                    else:
+                        modified_path = [current, emotion, emotion]  # Safe fallback
+                else:
+                    modified_path = path if path else [current, emotion, emotion]
+                    
+                emotion_steps[emotion] = (modified_distance, modified_path)
         
         # Sort by distance (fewer steps first)
         sorted_emotions = sorted(emotion_steps.items(), key=lambda x: x[1][0])

@@ -593,6 +593,21 @@ class UIStream:
         """
         log_state("Processing user message", {"message_preview": message[:50] + "..." if len(message) > 50 else message})
         
+        # Check if a journey was completed and we need to reset before processing the new message
+        journey_completed = False
+        if "goal_reached" in st.session_state and st.session_state.get("goal_reached", False):
+            log_state("New message after journey completion - resetting chat")
+            self.reset_chat()
+            
+            # Add the user's message to the reset chat
+            st.session_state.messages.append({"role": "user", "content": message})
+            
+            # Display user message in UI
+            with st.chat_message("user"):
+                st.markdown(message)
+                
+            journey_completed = True
+            
         # Create a placeholder for streaming response
         with st.chat_message("assistant"):
             placeholder = st.empty()
@@ -654,9 +669,24 @@ class UIStream:
                         "is_congrats": True
                     })
                     
+                    # Set a flag to indicate journey is complete
+                    st.session_state.goal_reached = True
+                    
                     # Display congratulations
                     placeholder = st.empty()
                     placeholder.markdown(congrats_message, unsafe_allow_html=True)
+                    
+                    # Add message about chat reset
+                    reset_message = "The chat will reset when you enter your next message, so you can start a new emotional journey."
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": reset_message,
+                        "is_info": True
+                    })
+                    
+                    # Display reset message
+                    with st.chat_message("assistant"):
+                        st.info(reset_message)
                     
                     # Reset goal but keep current emotion
                     st.session_state.goal_emotion = None
@@ -671,6 +701,10 @@ class UIStream:
                     
                     # Force rerun to show the new goal buttons
                     st.rerun()
+                
+                # If journey was completed and reset, don't continue processing
+                if journey_completed:
+                    return
                 
                 # If no goal is set, prepare to show goal options
                 elif not st.session_state.goal_emotion:
@@ -783,15 +817,15 @@ class UIStream:
             <div style="padding:15px;margin:10px 0;background-color:#f8f9fa;border-radius:10px;border:2px solid {color};text-align:center">
                 <div style="color:{color};font-size:1.5em;font-weight:bold;margin-bottom:10px">🎉 Congratulations! 🎉</div>
                 <div style="color:#000000;margin-bottom:10px">You\'ve successfully reached your emotional goal of <b>{safe_emotion}</b> {emoji}!</div>
-                <div style="color:#000000;margin-bottom:5px">Would you like to:</div>
-                <div style="color:#000000;margin-bottom:3px">• Continue with a new emotional goal</div>
-                <div style="color:#000000">• Keep expressing how you feel</div>
+                <div style="color:#000000;margin-bottom:5px">What would you like to do next?</div>
+                <div style="color:#000000;margin-bottom:3px">• Start a new emotional journey (chat will reset with your next message)</div>
+                <div style="color:#000000">• Take time to enjoy your current emotional state</div>
             </div>
             '''
         except Exception as e:
             logger.error(f"Error formatting goal reached message: {e}")
             # Super minimal fallback
-            return f"<div style='padding:15px;text-align:center;border:1px solid #ddd;border-radius:10px;margin:10px 0'><h3>🎉 Congratulations!</h3><p>You've reached your goal of feeling {emotion} {emoji}</p></div>"
+            return f"<div style='padding:15px;text-align:center;border:1px solid #ddd;border-radius:10px;margin:10px 0'><h3>🎉 Congratulations!</h3><p>You've reached your goal of feeling {emotion} {emoji}</p><p>The chat will reset when you send your next message.</p></div>"
     
     def _render_native_suggestions(self, is_latest):
         """
@@ -966,11 +1000,14 @@ class UIStream:
         <div style="padding:15px;margin:10px 0;background-color:#f8f9fa;border-radius:10px;border:2px solid {color};text-align:center">
             <div style="color:{color};font-size:1.5em;font-weight:bold;margin-bottom:10px">🎉 Congratulations! 🎉</div>
             <div style="color:#000000;margin-bottom:10px">You've successfully reached your emotional goal of <b>{emotion}</b> {emoji}!</div>
-            <div style="color:#000000;margin-bottom:5px">Would you like to:</div>
-            <div style="color:#000000;margin-bottom:3px">• Continue with a new emotional goal</div>
-            <div style="color:#000000">• Keep expressing how you feel</div>
+            <div style="color:#000000;margin-bottom:5px">What would you like to do next?</div>
+            <div style="color:#000000;margin-bottom:3px">• Start a new emotional journey (chat will reset with your next message)</div>
+            <div style="color:#000000">• Take time to enjoy your current emotional state</div>
         </div>
         """, unsafe_allow_html=True)
+        
+        # Also show the reset notification as a separate info message
+        st.info("The chat will reset when you enter your next message, so you can start a new emotional journey.")
     
     def run(self):
         """Run the UI Stream application."""

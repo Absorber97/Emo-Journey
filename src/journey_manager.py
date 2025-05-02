@@ -207,7 +207,7 @@ class JourneyManager:
         if current_step == 2 and chosen_progress == 0:
             logger.warning("Inconsistent progress: Step 2 with zero progress, setting to 50%")
             chosen_progress = 50
-                
+        
         return {
             "progress": chosen_progress,
             "steps_remaining": steps_remaining,
