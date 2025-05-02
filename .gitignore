@@ -71,8 +71,8 @@ coverage.xml
 
 # Project specific
 emojourney.log
-memory_bank
 memory_bank/
+memory_bank
 __pycache__/
 *.pyc
 */__pycache__/
