@@ -83,6 +83,11 @@ class UIStream:
         st.session_state.show_goal_buttons = False
         st.session_state.implemented_suggestions = set()
         st.session_state.chat_disabled = False
+        
+        # Explicitly reset goal_reached flag
+        st.session_state.goal_reached = False
+        
+        # Explicitly reset the journey manager
         self.journey_manager.reset()
         
         # Add welcome message
@@ -428,8 +433,11 @@ class UIStream:
                     "is_congrats": True
                 })
                 
-                # Re-enable chat
-                st.session_state.chat_disabled = False
+                # Keep chat disabled until explicit reset
+                st.session_state.chat_disabled = True
+                
+                # Set goal reached flag
+                st.session_state.goal_reached = True
                 
                 # Reset goal but keep current emotion
                 self.journey_manager.reset_goal()
@@ -558,16 +566,22 @@ class UIStream:
                             self.select_goal(i)
                             st.rerun()
         
-        # Display journey status message if chat is disabled
-        if st.session_state.chat_disabled and st.session_state.goal_emotion:
-            with st.container():
-                st.info(f"Chat input is disabled while you work towards {st.session_state.goal_emotion}. Choose a suggestion to continue your emotional journey.")
+        # Display journey status message if chat is disabled or goal reached
+        if st.session_state.chat_disabled:
+            # If goal has been reached, show different message
+            if st.session_state.get("goal_reached", False):
+                with st.container():
+                    st.info("You've reached your goal! To start a new journey, click the 'Start New Journey' button above.")
+            # Otherwise show standard message about working toward goal
+            elif st.session_state.goal_emotion:
+                with st.container():
+                    st.info(f"Chat input is disabled while you work towards {st.session_state.goal_emotion}. Choose a suggestion to continue your emotional journey.")
         
         # Chat input - conditionally enabled
-        if st.session_state.chat_disabled:
+        if st.session_state.chat_disabled or st.session_state.get("goal_reached", False):
             # Display disabled chat input
             st.text_input("How are you feeling?", 
-                         value="Chat disabled during emotional journey", 
+                         value="Chat input is disabled. Use the buttons above to continue.", 
                          disabled=True,
                          key="disabled_chat_input")
         else:
@@ -593,21 +607,6 @@ class UIStream:
         """
         log_state("Processing user message", {"message_preview": message[:50] + "..." if len(message) > 50 else message})
         
-        # Check if a journey was completed and we need to reset before processing the new message
-        journey_completed = False
-        if "goal_reached" in st.session_state and st.session_state.get("goal_reached", False):
-            log_state("New message after journey completion - resetting chat")
-            self.reset_chat()
-            
-            # Add the user's message to the reset chat
-            st.session_state.messages.append({"role": "user", "content": message})
-            
-            # Display user message in UI
-            with st.chat_message("user"):
-                st.markdown(message)
-                
-            journey_completed = True
-            
         # Create a placeholder for streaming response
         with st.chat_message("assistant"):
             placeholder = st.empty()
@@ -635,8 +634,7 @@ class UIStream:
                 st.session_state.current_emotion = emotion
                 
                 # Save the user message context for use in suggestions
-                if "user_context" not in st.session_state:
-                    st.session_state.user_context = message
+                st.session_state.user_context = message
                 
                 # Format the emotion badge
                 emotion_badge = self.format_emotion(emotion, emoji, color)
@@ -676,35 +674,11 @@ class UIStream:
                     placeholder = st.empty()
                     placeholder.markdown(congrats_message, unsafe_allow_html=True)
                     
-                    # Add message about chat reset
-                    reset_message = "The chat will reset when you enter your next message, so you can start a new emotional journey."
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": reset_message,
-                        "is_info": True
-                    })
-                    
-                    # Display reset message
-                    with st.chat_message("assistant"):
-                        st.info(reset_message)
-                    
-                    # Reset goal but keep current emotion
-                    st.session_state.goal_emotion = None
-                    st.session_state.show_goal_buttons = True
-                    
                     # Re-enable chat since goal was reached
                     st.session_state.chat_disabled = False
                     
-                    # Get new goal options for next journey
-                    goal_options = self.journey_manager.get_goal_options(n=2)
-                    st.session_state.goal_options = goal_options
-                    
-                    # Force rerun to show the new goal buttons
+                    # Force rerun to update UI
                     st.rerun()
-                
-                # If journey was completed and reset, don't continue processing
-                if journey_completed:
-                    return
                 
                 # If no goal is set, prepare to show goal options
                 elif not st.session_state.goal_emotion:
@@ -746,18 +720,14 @@ class UIStream:
                     log_state(f"Generated {len(suggestions)} suggestions")
                     st.session_state.suggestions = suggestions
                     
-                    # Format suggestions
-                    suggestions_html = self._format_suggestions_html(suggestions, progress)
-                    
-                    # Add suggestions to chat history
+                    # Add suggestions marker to chat history
                     st.session_state.messages.append({
                         "role": "assistant",
-                        "content": suggestions_html,
+                        "content": "USE_NATIVE_COMPONENTS",
                         "is_suggestions": True
                     })
                     
                     # Display suggestions
-                    placeholder.markdown(suggestions_html, unsafe_allow_html=True)
                     log_state("Displayed suggestions to user")
             
             except Exception as e:
@@ -811,21 +781,12 @@ class UIStream:
             # Sanitize inputs
             safe_emotion = emotion.replace("<", "&lt;").replace(">", "&gt;")
             
-            # Ultra simplified HTML with black text for better readability against white background
-            # Using single quotes for HTML to avoid issues with text content
-            return f'''
-            <div style="padding:15px;margin:10px 0;background-color:#f8f9fa;border-radius:10px;border:2px solid {color};text-align:center">
-                <div style="color:{color};font-size:1.5em;font-weight:bold;margin-bottom:10px">🎉 Congratulations! 🎉</div>
-                <div style="color:#000000;margin-bottom:10px">You\'ve successfully reached your emotional goal of <b>{safe_emotion}</b> {emoji}!</div>
-                <div style="color:#000000;margin-bottom:5px">What would you like to do next?</div>
-                <div style="color:#000000;margin-bottom:3px">• Start a new emotional journey (chat will reset with your next message)</div>
-                <div style="color:#000000">• Take time to enjoy your current emotional state</div>
-            </div>
-            '''
+            # Use a simple marker that will trigger native components
+            return "USE_NATIVE_COMPONENTS"
         except Exception as e:
             logger.error(f"Error formatting goal reached message: {e}")
             # Super minimal fallback
-            return f"<div style='padding:15px;text-align:center;border:1px solid #ddd;border-radius:10px;margin:10px 0'><h3>🎉 Congratulations!</h3><p>You've reached your goal of feeling {emotion} {emoji}</p><p>The chat will reset when you send your next message.</p></div>"
+            return f"<div style='padding:15px;text-align:center;border:1px solid #ddd;border-radius:10px;margin:10px 0'><h3>🎉 Congratulations!</h3><p>You've reached your goal of feeling {emotion} {emoji}</p></div>"
     
     def _render_native_suggestions(self, is_latest):
         """
@@ -1001,13 +962,15 @@ class UIStream:
             <div style="color:{color};font-size:1.5em;font-weight:bold;margin-bottom:10px">🎉 Congratulations! 🎉</div>
             <div style="color:#000000;margin-bottom:10px">You've successfully reached your emotional goal of <b>{emotion}</b> {emoji}!</div>
             <div style="color:#000000;margin-bottom:5px">What would you like to do next?</div>
-            <div style="color:#000000;margin-bottom:3px">• Start a new emotional journey (chat will reset with your next message)</div>
-            <div style="color:#000000">• Take time to enjoy your current emotional state</div>
         </div>
         """, unsafe_allow_html=True)
         
-        # Also show the reset notification as a separate info message
-        st.info("The chat will reset when you enter your next message, so you can start a new emotional journey.")
+        # Add explicit reset button
+        if st.button("Start New Journey", key="new_journey_button", type="primary"):
+            # Reset the chat completely
+            self.reset_chat()
+            # Force rerun to show new chat
+            st.rerun()
     
     def run(self):
         """Run the UI Stream application."""

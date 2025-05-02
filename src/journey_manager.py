@@ -1102,15 +1102,14 @@ class JourneyManager:
         return fallbacks
     
     def reset(self) -> None:
-        """Reset all journey state but preserve user context."""
-        # Keep a copy of the user context
-        user_context = self.user_context
-        
-        # Clear journey state
+        """Reset all journey state."""
+        # Clear all journey state
         self.history.clear()
         self.current_emotion = None
         self.goal_emotion = None
         self.path = []
+        self.user_context = None
+        self.context_history = []
         
-        # Preserve the user context
-        self.user_context = user_context 
+        # Log the reset
+        logger.info("Journey Manager state fully reset") 
