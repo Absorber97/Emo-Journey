@@ -2,10 +2,14 @@
 Main entry point for EmoJourney application.
 """
 import os
+import sys
 from dotenv import load_dotenv
 
-from ui_stream import UIStream, setup_page
-from journey_manager import JourneyManager
+# Add the current directory to the Python path to enable relative imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.ui_stream import UIStream, setup_page
+from src.journey_manager import JourneyManager
 
 def main():
     """Main application entry point."""

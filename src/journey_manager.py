@@ -8,10 +8,11 @@ import json
 import openai
 import logging
 import streamlit as st
+import time
 
-from emotion_api import EmotionAPI
-from graph_planner import EmotionGraph
-from cache import emotion_cache
+from src.emotion_api import EmotionAPI
+from src.graph_planner import EmotionGraph
+from src.cache import emotion_cache
 
 # Get logger
 logger = logging.getLogger("EmoJourney")
@@ -158,26 +159,43 @@ class JourneyManager:
         # Fixed 2-step journey regardless of actual path length
         total_steps = 2
         
-        # Check if we have chosen suggestions to determine progress
+        # Default values for beginning journey
         chosen_progress = 0
         current_step = 1
+        steps_remaining = 2
         
         # Check if we have chosen suggestions in session state
         if hasattr(st.session_state, 'chosen_suggestions') and st.session_state.chosen_suggestions:
-            # Get the last chosen suggestion's progress value
-            last_suggestion = st.session_state.chosen_suggestions[-1]
-            chosen_progress = last_suggestion.get('closer_percentage', 0)
+            # Number of chosen suggestions determines the step
+            num_chosen = len(st.session_state.chosen_suggestions)
             
-            # If we've chosen at least one suggestion, we're at step 2
-            current_step = 2
-            
-            # If we've chosen more than one suggestion, we've completed the journey
-            if len(st.session_state.chosen_suggestions) > 1:
+            if num_chosen == 1:
+                # First step completed - show step 2
+                last_suggestion = st.session_state.chosen_suggestions[0]
+                chosen_progress = last_suggestion.get('closer_percentage', 0)
+                current_step = 2  # Explicitly mark as step 2
+                steps_remaining = 1
+                logger.info(f"Progress: Step 2, after choosing first suggestion: {last_suggestion['title']}")
+            elif num_chosen >= 2:
+                # Both steps completed
                 chosen_progress = 100
+                current_step = 2  # Still step 2 but complete
+                steps_remaining = 0
+                logger.info(f"Progress: Journey complete with all {num_chosen} suggestions chosen")
+            else:
+                logger.info(f"Progress: Step 1, no suggestions chosen yet")
+        else:
+            logger.info(f"Progress: Step 1, beginning journey")
+            
+        # Ensure progress values are consistent with step
+        if current_step == 1 and chosen_progress > 0:
+            logger.warning("Inconsistent progress: Step 1 with non-zero progress, resetting to 0")
+            chosen_progress = 0
+            
+        if current_step == 2 and chosen_progress == 0:
+            logger.warning("Inconsistent progress: Step 2 with zero progress, setting to 50%")
+            chosen_progress = 50
                 
-        # Calculate steps remaining
-        steps_remaining = total_steps - current_step + 1 if current_step <= total_steps else 0
-        
         return {
             "progress": chosen_progress,
             "steps_remaining": steps_remaining,
@@ -202,7 +220,7 @@ class JourneyManager:
         progress = self.get_progress()
         
         # Check if we can use cached suggestions for this transition stage
-        cache_key = f"suggestion:{self.current_emotion}:{self.goal_emotion}:{progress['current_step']}"
+        cache_key = f"suggestion:{self.current_emotion}:{self.goal_emotion}:{progress['current_step']}:{int(time.time()/300)}"
         cached_suggestions = emotion_cache.get(cache_key)
         
         if cached_suggestions:
@@ -244,6 +262,17 @@ class JourneyManager:
         first_title = "faster" if current_step == 1 else "first" 
         second_title = "slower" if current_step == 1 else "second"
         
+        # Get previous suggestion titles to avoid duplicates
+        previous_suggestions = []
+        if hasattr(st.session_state, 'chosen_suggestions'):
+            previous_suggestions = [s['title'] for s in st.session_state.chosen_suggestions]
+        if hasattr(st.session_state, 'suggestions'):
+            previous_suggestions.extend([s['title'] for s in st.session_state.suggestions])
+        
+        # Make previous suggestions list unique
+        previous_suggestions = list(set(previous_suggestions))
+        lower_previous = [s.lower() for s in previous_suggestions]
+        
         # Create system prompt for suggestion generation
         system_prompt = f"""
         You are an emotional coach guiding someone from their current emotion ({self.current_emotion}) 
@@ -278,6 +307,11 @@ class JourneyManager:
         ]
         """
         
+        # Add previous suggestion avoidance for step 2
+        if current_step > 1 and previous_suggestions:
+            system_prompt += f"\n\nIMPORTANT - Previously seen suggestions that MUST NOT be repeated:\n{', '.join(previous_suggestions)}\n"
+            system_prompt += "\nYour suggestions MUST be completely different from any previous suggestions!"
+        
         try:
             # Call OpenAI API for suggestions
             logger.info(f"Generating suggestions for {self.current_emotion} -> {self.goal_emotion}")
@@ -285,6 +319,7 @@ class JourneyManager:
             response = client.chat.completions.create(
                 model=model,
                 response_format={"type": "json_object"},
+                temperature=0.8,  # Add some variety
                 messages=[
                     {"role": "system", "content": system_prompt}
                 ]
@@ -296,102 +331,360 @@ class JourneyManager:
                 logger.warning("Empty response from OpenAI API")
                 raise ValueError("Empty response from OpenAI API")
             
-            suggestions = []  # Initialize suggestions as empty list to fix linter error
-                
+            # Try to parse the JSON response with improved error handling
             try:
-                result = json.loads(content)
+                # Log the first part of the response for debugging
+                logger.info(f"API response sample: {content[:200]}...")
                 
-                # Handle different response formats
-                if isinstance(result, list):
-                    suggestions = result
-                elif isinstance(result, dict) and "suggestions" in result:
-                    suggestions = result.get("suggestions", [])
-                elif isinstance(result, dict):
-                    # Extract suggestions array from the top level object
-                    # This is needed because sometimes GPT wraps the array in an object
-                    suggestions = []
-                    for key, value in result.items():
-                        if isinstance(value, list) and len(value) > 0:
-                            if all(isinstance(item, dict) and "title" in item for item in value):
-                                suggestions = value
-                                break
+                # Initialize suggestions as empty list
+                suggestions = []
+                
+                # Try to parse the JSON directly first
+                if content.strip().startswith('[') and content.strip().endswith(']'):
+                    # If content is directly a JSON array
+                    try:
+                        suggestions = json.loads(content)
+                        logger.info(f"Parsed direct JSON array with {len(suggestions)} suggestions")
+                    except json.JSONDecodeError:
+                        # Handle malformed JSON
+                        logger.error("Failed to parse direct JSON array")
+                        suggestions = []
+                else:
+                    # Try to parse as JSON object
+                    try:
+                        result = json.loads(content)
+                        
+                        # Handle different response formats
+                        if isinstance(result, list) and len(result) > 0:
+                            suggestions = result
+                            logger.info(f"Successfully parsed JSON array with {len(suggestions)} suggestions")
+                        elif isinstance(result, dict) and "suggestions" in result:
+                            suggestions = result.get("suggestions", [])
+                            logger.info(f"Successfully parsed JSON object with 'suggestions' key, found {len(suggestions)} suggestions")
+                        elif isinstance(result, dict) and any(key in ["0", "1", "2"] or isinstance(key, int) for key in result.keys()):
+                            # Sometimes the model returns indexed suggestions
+                            suggestions = []
+                            for key in result.keys():
+                                if (isinstance(key, str) and key.isdigit()) or isinstance(key, int):
+                                    if isinstance(result[key], dict):
+                                        suggestions.append(result[key])
+                            logger.info(f"Parsed indexed suggestions, found {len(suggestions)} suggestions")
+                        elif isinstance(result, dict) and len(result) >= 1:
+                            # Try to find any arrays in the result
+                            for key, value in result.items():
+                                if isinstance(value, list) and len(value) > 0:
+                                    if all(isinstance(item, dict) for item in value):
+                                        suggestions = value
+                                        logger.info(f"Found embedded suggestions array under key '{key}'")
+                                        break
+                            
+                            # If we still don't have suggestions, try to extract them from any object
+                            if not suggestions:
+                                for key, value in result.items():
+                                    if isinstance(value, dict) and "title" in value and "description" in value:
+                                        suggestions.append(value)
+                                        logger.info(f"Extracted suggestion from key '{key}'")
+                    except json.JSONDecodeError:
+                        # Handle malformed JSON
+                        logger.error("Failed to parse JSON object")
+                        suggestions = []
+                
+                # Validate suggestions
+                valid_suggestions = []
+                for i, sugg in enumerate(suggestions):
+                    if not isinstance(sugg, dict):
+                        logger.warning(f"Skipping non-dict suggestion: {sugg}")
+                        continue
+                        
+                    title = sugg.get("title")
+                    description = sugg.get("description")
                     
-                    # If we still don't have suggestions, try to create them from the response
-                    if not suggestions and len(result) >= 1:
-                        # Convert numbered keys to suggestions
-                        for key in ["1", "2", 1, 2]:
-                            if key in result and isinstance(result[key], dict):
-                                item = result[key]
-                                if "title" not in item and "description" in item:
-                                    # Create a title from the first few words of description
-                                    description = item["description"]
-                                    title_words = description.split()[:3]
-                                    item["title"] = " ".join(title_words) + "..."
-                                suggestions.append(item)
+                    if title and description:
+                        # Make sure title doesn't match previous suggestions
+                        if current_step == 1 or title.lower() not in lower_previous:
+                            # Make sure suggestion has required fields
+                            valid_sugg = {
+                                "title": title,
+                                "description": description,
+                                "closer_percentage": sugg.get("closer_percentage", 100)
+                            }
+                            valid_suggestions.append(valid_sugg)
+                            logger.info(f"Valid suggestion {i+1}: {title}")
+                        else:
+                            logger.info(f"Skipping duplicate suggestion: {title}")
                 
-                # If still no valid suggestions, use the fallback
-                if not suggestions:
-                    logger.warning("No valid suggestions found in API response, using fallback")
-                    raise ValueError("No valid suggestions found in API response")
+                suggestions = valid_suggestions
                 
-                # Ensure we have at least 2 suggestions
-                if len(suggestions) < 2:
-                    logger.warning(f"Only {len(suggestions)} suggestions found, adding fallback suggestion")
-                    suggestions.append({
-                        "title": "Take a deeper emotional journey",
-                        "description": f"Take a moment to reflect on times when you've felt {self.goal_emotion} before and what triggered those feelings.",
-                        "closer_percentage": slower_progress
-                    })
-                
-                # Ensure correct closer_percentage values
+                # If we have valid suggestions, return them
                 if len(suggestions) >= 2:
+                    # Ensure correct closer_percentage values
                     suggestions[0]["closer_percentage"] = faster_progress
                     suggestions[1]["closer_percentage"] = slower_progress
+                    
+                    # Add timestamp to suggestions for tracking
+                    for sugg in suggestions:
+                        sugg["timestamp"] = int(time.time())
+                    
+                    logger.info(f"Successfully generated {len(suggestions)} suggestions")
+                    titles = [s["title"] for s in suggestions]
+                    logger.info(f"Suggestion titles: {titles}")
+                    
+                    # Cache these suggestions with a 5-minute lifetime (using timestamp in key)
+                    emotion_cache.set(cache_key, suggestions)
+                    
+                    return suggestions
+                    
+                logger.warning(f"Only found {len(suggestions)} valid suggestions, using fallbacks")
                 
-                # Cache the validated suggestions
-                emotion_cache.set(cache_key, suggestions)
-                logger.info(f"Cached {len(suggestions)} suggestions")
-                
-                return suggestions
-                
-            except json.JSONDecodeError as e:
-                logger.error(f"JSON parsing error: {e}, content: {content[:100]}...")
-                raise ValueError(f"Invalid JSON response: {e}")
+            except Exception as e:
+                logger.error(f"Error parsing suggestions: {e}")
+                # Continue to fallbacks
         
         except Exception as e:
             logger.error(f"Error generating suggestions: {e}")
-            # Return fallback suggestions that are tailored to the specific emotion journey
-            if self.current_emotion and self.goal_emotion:
-                # Create emotion-focused suggestions with different progress potentials
-                suggestions = [
-                    {
-                        "title": f"Immediate shift toward {self.goal_emotion}",
-                        "description": f"Recall a powerful memory that made you feel {self.goal_emotion} and immerse yourself in that emotional memory right now.",
-                        "closer_percentage": faster_progress
-                    },
-                    {
-                        "title": f"Gradual transition from {self.current_emotion}",
-                        "description": f"Accept your current feeling of {self.current_emotion} while gently opening yourself to the possibility of experiencing {self.goal_emotion} soon.",
-                        "closer_percentage": slower_progress
-                    }
-                ]
-                
-                logger.info(f"Using fallback suggestions for {self.current_emotion} -> {self.goal_emotion}")
-                return suggestions
+            # Continue to fallbacks
+        
+        # Generate emotion-focused fallback suggestions with different progress potentials
+        if current_step == 1:
+            # First step fallbacks - created based on current to goal emotion transition
+            emotion_transition_fallbacks = self._create_first_step_fallbacks(self.current_emotion, self.goal_emotion)
+            logger.info(f"Using first step fallbacks for {self.current_emotion} -> {self.goal_emotion}")
             
-            # Generic fallback if we don't have emotion data
-            return [
+            # Make sure we have consistent progress values
+            if len(emotion_transition_fallbacks) >= 2:
+                emotion_transition_fallbacks[0]["closer_percentage"] = faster_progress
+                emotion_transition_fallbacks[1]["closer_percentage"] = slower_progress
+                return emotion_transition_fallbacks
+        else:
+            # Second step fallbacks - more important these are fresh and different
+            if hasattr(st.session_state, 'chosen_suggestions') and st.session_state.chosen_suggestions:
+                chosen_title = st.session_state.chosen_suggestions[0]['title']
+                emotion_transition_fallbacks = self._create_second_step_fallbacks(chosen_title, self.current_emotion, self.goal_emotion)
+                logger.info(f"Using second step fallbacks after {chosen_title}")
+                
+                # Make sure we have consistent progress values for second step
+                if len(emotion_transition_fallbacks) >= 2:
+                    emotion_transition_fallbacks[0]["closer_percentage"] = 100
+                    emotion_transition_fallbacks[1]["closer_percentage"] = 100
+                    return emotion_transition_fallbacks
+        
+        # Generic fallback if everything else fails
+        return [
+            {
+                "title": f"Immediate shift toward {self.goal_emotion}",
+                "description": f"Recall a powerful memory that made you feel {self.goal_emotion} and immerse yourself in that emotional memory right now.",
+                "closer_percentage": faster_progress,
+                "timestamp": int(time.time())
+            },
+            {
+                "title": f"Gradual transition from {self.current_emotion}",
+                "description": f"Accept your current feeling of {self.current_emotion} while gently opening yourself to the possibility of experiencing {self.goal_emotion} soon.",
+                "closer_percentage": slower_progress,
+                "timestamp": int(time.time())
+            }
+        ]
+    
+    def _create_first_step_fallbacks(self, current_emotion, goal_emotion):
+        """Create context-aware first step fallbacks based on the emotion transition"""
+        # Organize fallbacks by emotion transition categories
+        emotion_fallbacks = {
+            # Transitions to joy
+            "joy": [
                 {
-                    "title": "Quick emotional perspective shift",
-                    "description": "Consciously shift your attention to positive aspects of your current situation that might trigger a sense of hope or optimism.",
-                    "closer_percentage": 60
+                    "title": "Notice small pleasures",
+                    "description": "Begin by intentionally noticing small positive moments in your day that might otherwise go unappreciated.",
+                    "closer_percentage": 50
                 },
                 {
-                    "title": "Emotional acceptance practice",
-                    "description": "Notice your current feeling without judgment, allowing it to exist while gently opening to the possibility of a gradual emotional shift.",
-                    "closer_percentage": 30
+                    "title": "Shift perspective with gratitude",
+                    "description": "Identify three specific things you appreciate right now, allowing the feeling of gratitude to open the door to joy.",
+                    "closer_percentage": 75
+                }
+            ],
+            # Transitions to surprise
+            "surprise": [
+                {
+                    "title": "Connect emotional dots",
+                    "description": "Look for unexpected connections between your current feelings and past experiences that might reveal something new.",
+                    "closer_percentage": 50
+                },
+                {
+                    "title": "Cultivate curiosity",
+                    "description": "Approach your current situation with genuine curiosity about what unexpected insights or outcomes might emerge.",
+                    "closer_percentage": 75
+                }
+            ],
+            # Transitions to anticipation
+            "anticipation": [
+                {
+                    "title": "Envision possibilities",
+                    "description": "Allow yourself to imagine positive future scenarios that might emerge from your current circumstances.",
+                    "closer_percentage": 50
+                },
+                {
+                    "title": "Plant seeds of hope",
+                    "description": "Identify small actions you can take now that might lead to positive changes in how you feel tomorrow.",
+                    "closer_percentage": 75
+                }
+            ],
+            # Transitions to trust
+            "trust": [
+                {
+                    "title": "Recognize inner stability",
+                    "description": "Acknowledge your ability to handle difficult emotions by recalling past challenges you've successfully navigated.",
+                    "closer_percentage": 50
+                },
+                {
+                    "title": "Connect with support",
+                    "description": "Mentally connect with people or resources you trust, allowing their presence to shift your emotional state.",
+                    "closer_percentage": 75
                 }
             ]
+        }
+        
+        # Default fallbacks for any emotion
+        default_fallbacks = [
+            {
+                "title": f"Shift focus toward {goal_emotion}",
+                "description": f"Deliberately shift your attention to aspects of your experience that might naturally evoke {goal_emotion}.",
+                "closer_percentage": 50,
+                "timestamp": int(time.time())
+            },
+            {
+                "title": f"Open emotional pathways from {current_emotion}",
+                "description": f"Accept your {current_emotion} while consciously creating space for {goal_emotion} to emerge alongside it.",
+                "closer_percentage": 75,
+                "timestamp": int(time.time())
+            }
+        ]
+        
+        # Return specific emotion transitions if available, otherwise default
+        return emotion_fallbacks.get(goal_emotion, default_fallbacks)
+    
+    def _create_second_step_fallbacks(self, first_choice, current_emotion, goal_emotion):
+        """Create context-aware second step fallbacks based on first choice and target emotion"""
+        
+        # Handle cases where goal_emotion might be None
+        if goal_emotion is None:
+            goal_emotion = "positive emotion"  # Safe fallback
+        
+        # Clean up the first choice title to extract key concepts
+        first_choice_lower = first_choice.lower()
+        
+        # Default second steps for different first choice themes
+        if "gratitude" in first_choice_lower or "appreciate" in first_choice_lower:
+            return [
+                {
+                    "title": "Transform appreciation into joy",
+                    "description": f"Allow your feelings of gratitude to naturally evolve into authentic {goal_emotion}, expanding beyond appreciation to direct experience.",
+                    "closer_percentage": 100,
+                    "timestamp": int(time.time())
+                },
+                {
+                    "title": "From recognition to embodiment",
+                    "description": f"Move from acknowledging positive aspects to fully embodying the feeling of {goal_emotion} they naturally create.",
+                    "closer_percentage": 100,
+                    "timestamp": int(time.time())
+                }
+            ]
+        elif "curiosity" in first_choice_lower or "connect" in first_choice_lower:
+            return [
+                {
+                    "title": "Open to Novel Discoveries",
+                    "description": f"Transform your curiosity into true {goal_emotion} by embracing the unexpected connections and insights emerging in your awareness.",
+                    "closer_percentage": 100,
+                    "timestamp": int(time.time())
+                },
+                {
+                    "title": "From Questions to Wonder",
+                    "description": f"Allow your questioning mind to give way to the direct experience of {goal_emotion} as you discover new emotional possibilities.",
+                    "closer_percentage": 100,
+                    "timestamp": int(time.time())
+                }
+            ]
+        elif "possibility" in first_choice_lower or "hope" in first_choice_lower:
+            return [
+                {
+                    "title": "Transform Hope into Reality",
+                    "description": f"Feel the seeds of hope you've planted blossoming into the direct experience of {goal_emotion} in this moment.",
+                    "closer_percentage": 100,
+                    "timestamp": int(time.time())
+                },
+                {
+                    "title": "From Future to Present",
+                    "description": f"Bring your positive anticipation into the present moment, allowing future possibilities to manifest as {goal_emotion} now.",
+                    "closer_percentage": 100,
+                    "timestamp": int(time.time())
+                }
+            ]
+        
+        # Generic goal-specific second steps
+        emotion_specific_fallbacks = {
+            "joy": [
+                {
+                    "title": "Complete joy activation",
+                    "description": "Allow the initial sparks of positivity to fully blossom into authentic joy by connecting with your body's natural capacity for delight.",
+                    "closer_percentage": 100,
+                    "timestamp": int(time.time())
+                },
+                {
+                    "title": "Joy embodiment practice",
+                    "description": "Move from thinking about joy to physically embodying it through your posture, breathing, and facial expression.",
+                    "closer_percentage": 100,
+                    "timestamp": int(time.time())
+                }
+            ],
+            "surprise": [
+                {
+                    "title": "Embrace the unexpected",
+                    "description": "Fully open to the feeling of surprise by welcoming the unknown and unexpected aspects of your current experience.",
+                    "closer_percentage": 100,
+                    "timestamp": int(time.time())
+                },
+                {
+                    "title": "Transform perspective completely",
+                    "description": "Allow your familiar ways of seeing your situation to dissolve, making space for genuinely surprising new insights.",
+                    "closer_percentage": 100,
+                    "timestamp": int(time.time())
+                }
+            ],
+            "trust": [
+                {
+                    "title": "Full emotional security",
+                    "description": "Deepen your sense of trust by fully recognizing the internal and external resources that support your emotional wellbeing.",
+                    "closer_percentage": 100,
+                    "timestamp": int(time.time())
+                },
+                {
+                    "title": "Embody confident stability",
+                    "description": "Allow trust to permeate your entire being by physically embodying the qualities of groundedness and calm confidence.",
+                    "closer_percentage": 100,
+                    "timestamp": int(time.time())
+                }
+            ]
+        }
+        
+        # Default fallbacks in case the emotion isn't in our specific list
+        default_fallbacks = [
+            {
+                "title": f"Complete transition to {goal_emotion}",
+                "description": f"Fully immerse yourself in the qualities and sensations of {goal_emotion}, allowing it to replace your previous emotional state.",
+                "closer_percentage": 100,
+                "timestamp": int(time.time())
+            },
+            {
+                "title": f"Embody {goal_emotion} completely",
+                "description": f"Move beyond thinking about {goal_emotion} to fully experiencing it in your body, breath, and awareness.",
+                "closer_percentage": 100,
+                "timestamp": int(time.time())
+            }
+        ]
+        
+        # Return emotion-specific fallbacks if available, otherwise default
+        if goal_emotion in emotion_specific_fallbacks:
+            return emotion_specific_fallbacks[goal_emotion]
+        else:
+            return default_fallbacks
     
     def generate_fresh_suggestions(self, context: str, chosen_suggestion: str) -> List[Dict[str, Any]]:
         """
@@ -414,49 +707,61 @@ class JourneyManager:
         faster_progress = 100  # Second step, both reach 100%
         slower_progress = 100  # Second step, both reach 100%
         
+        # Get previous suggestion titles to avoid duplicates
+        previous_suggestions = []
+        if hasattr(st.session_state, 'chosen_suggestions'):
+            previous_suggestions = [s['title'] for s in st.session_state.chosen_suggestions]
+        if hasattr(st.session_state, 'suggestions'):
+            previous_suggestions.extend([s['title'] for s in st.session_state.suggestions])
+        
+        # Make previous suggestions list unique and convert to lowercase for comparison
+        previous_suggestions = list(set(previous_suggestions))
+        lower_previous = [s.lower() for s in previous_suggestions]
+        logger.info(f"Avoiding duplicate suggestions: {previous_suggestions}")
+        
+        # Add current timestamp to cache key for variety over time
+        cache_key = f"fresh_suggestion:{self.current_emotion}:{self.goal_emotion}:{chosen_suggestion}:{int(time.time()/300)}"
+        cached_suggestions = emotion_cache.get(cache_key)
+        
+        if cached_suggestions:
+            logger.info(f"Using cached fresh suggestions after {chosen_suggestion}")
+            return cached_suggestions
+        
         # Update context with current progress and chosen suggestion
-        full_context = f"{context} Just chose: {chosen_suggestion}."
+        full_context = f"Starting from {self.current_emotion}, the user is working towards {self.goal_emotion}. They just chose the suggestion '{chosen_suggestion}' which brought them {progress.get('progress', 0)}% toward their goal. Now you need to provide the final step suggestions to complete their journey."
         
-        # Get the last chosen suggestion's progress value 
-        chosen_progress = 0
-        if hasattr(st.session_state, 'chosen_suggestions') and st.session_state.chosen_suggestions:
-            last_suggestion = st.session_state.chosen_suggestions[-1]
-            chosen_progress = last_suggestion.get('closer_percentage', 0)
-        
-        # Create system prompt for final suggestion generation
+        # Create a more explicit system prompt for final suggestion generation
         system_prompt = f"""
         You are an emotional coach guiding someone on their journey from {self.current_emotion} to {self.goal_emotion}.
         
-        Context of their journey so far: {full_context}
+        CONTEXT: {full_context}
         
-        The user has chosen a suggestion that brought them {chosen_progress}% of the way toward {self.goal_emotion}.
-        Now you need to provide the FINAL suggestions to complete their journey.
+        IMPORTANT - Previously seen suggestions that MUST NOT be repeated:
+        {', '.join(previous_suggestions)}
         
-        Generate two NEW and DIFFERENT emotional transition suggestions that will take them from {chosen_progress}% to 100%.
+        Generate two COMPLETELY NEW emotional transition suggestions that directly build upon "{chosen_suggestion}" and take the user from {progress.get('progress', 0)}% all the way to 100% completion of their journey.
         
-        Your suggestions must:
-        1. Be different from "{chosen_suggestion}" but complementary to it
-        2. Feel like a natural next step after their choice
-        3. Focus on emotional shifts and perspectives, not just actions
+        Your suggestions MUST:
+        1. Be completely different from any previous suggestions, especially "{chosen_suggestion}"
+        2. Feel like natural progression after they chose "{chosen_suggestion}"
+        3. Focus on emotional perspective shifts, not just actions
         4. Complete their journey to reach {self.goal_emotion} fully
-        5. Adapt the style, tone, and imagery to match the target emotion ({self.goal_emotion})
+        5. NOT repeat any titles or themes from previous suggestions
+        6. Have different approaches from each other (two distinct paths to the same goal)
         
-        IMPORTANT: 
-        - Both suggestions should provide the final progress needed to reach 100%
-        - Both should be fresh ideas with different approaches to reach the same goal
-        - Each suggestion should have a distinct emotional tone or perspective
+        Both suggestions should bring the user to 100% completion, but through different emotional approaches.
         
-        Respond with a JSON array of two suggestion objects in the following format:
+        DO NOT REPLY WITH PROSE. Respond ONLY with a raw JSON array in the following format:
         [
             {{
-                "title": "Short title for first final step suggestion",
-                "description": "Description of how this final emotional perspective completes their journey (1-2 sentences)",
-                "closer_percentage": {faster_progress}
+                "title": "Completely new suggestion title 1",
+                "description": "How this emotional approach completes their journey (1-2 sentences)",
+                "closer_percentage": 100
             }},
             {{
-                "title": "Short title for second final step suggestion",
-                "description": "Description of an alternative final emotional approach (1-2 sentences)",
-                "closer_percentage": {slower_progress}
+                "title": "Completely different suggestion title 2",
+                "description": "Alternative emotional approach to reach their goal (1-2 sentences)",
+                "closer_percentage": 100
             }}
         ]
         """
@@ -468,124 +773,133 @@ class JourneyManager:
             response = client.chat.completions.create(
                 model="gpt-4o",
                 response_format={"type": "json_object"},
+                temperature=0.9,  # Higher temperature for more variety
                 messages=[
                     {"role": "system", "content": system_prompt}
                 ]
             )
             
-            # Parse and process the response
+            # Get the raw response to debug
             content = response.choices[0].message.content
+            logger.info(f"Raw API response: {content[:200]}...")  # Log first 200 chars for debugging
+            
             if not content:
                 logger.warning("Empty response from OpenAI API")
                 raise ValueError("Empty response from OpenAI API")
             
-            suggestions = []  # Initialize suggestions as empty list
+            # Initialize suggestions as empty list
+            suggestions = []
                 
             try:
-                result = json.loads(content)
+                # Try to parse the JSON directly first
+                if content.strip().startswith('[') and content.strip().endswith(']'):
+                    # If content is directly a JSON array
+                    try:
+                        suggestions = json.loads(content)
+                        logger.info(f"Parsed direct JSON array with {len(suggestions)} suggestions")
+                    except json.JSONDecodeError:
+                        # Handle malformed JSON
+                        logger.error("Failed to parse direct JSON array")
+                        suggestions = []
+                else:
+                    # Try to parse as JSON object
+                    try:
+                        result = json.loads(content)
+                        
+                        # Handle different response formats
+                        if isinstance(result, list) and len(result) > 0:
+                            suggestions = result
+                            logger.info(f"Successfully parsed JSON array with {len(suggestions)} suggestions")
+                        elif isinstance(result, dict) and "suggestions" in result:
+                            suggestions = result.get("suggestions", [])
+                            logger.info(f"Successfully parsed JSON object with 'suggestions' key, found {len(suggestions)} suggestions")
+                        elif isinstance(result, dict) and any(key in ["0", "1", "2"] or isinstance(key, int) for key in result.keys()):
+                            # Sometimes the model returns indexed suggestions
+                            suggestions = []
+                            for key in result.keys():
+                                if (isinstance(key, str) and key.isdigit()) or isinstance(key, int):
+                                    if isinstance(result[key], dict):
+                                        suggestions.append(result[key])
+                            logger.info(f"Parsed indexed suggestions, found {len(suggestions)} suggestions")
+                        elif isinstance(result, dict) and len(result) >= 1:
+                            # Try to find any arrays in the result
+                            for key, value in result.items():
+                                if isinstance(value, list) and len(value) > 0:
+                                    if all(isinstance(item, dict) for item in value):
+                                        suggestions = value
+                                        logger.info(f"Found embedded suggestions array under key '{key}'")
+                                        break
+                            
+                            # If we still don't have suggestions, try to extract them from any object
+                            if not suggestions:
+                                for key, value in result.items():
+                                    if isinstance(value, dict) and "title" in value and "description" in value:
+                                        suggestions.append(value)
+                                        logger.info(f"Extracted suggestion from key '{key}'")
+                    except json.JSONDecodeError:
+                        # Handle malformed JSON
+                        logger.error("Failed to parse JSON object")
+                        suggestions = []
                 
-                # Handle different response formats
-                if isinstance(result, list):
-                    suggestions = result
-                elif isinstance(result, dict) and "suggestions" in result:
-                    suggestions = result.get("suggestions", [])
-                elif isinstance(result, dict):
-                    # Extract suggestions array from the top level object
-                    suggestions = []
-                    for key, value in result.items():
-                        if isinstance(value, list) and len(value) > 0:
-                            if all(isinstance(item, dict) and "title" in item for item in value):
-                                suggestions = value
-                                break
+                # Validate suggestions
+                valid_suggestions = []
+                for i, sugg in enumerate(suggestions):
+                    if not isinstance(sugg, dict):
+                        logger.warning(f"Skipping non-dict suggestion: {sugg}")
+                        continue
+                        
+                    title = sugg.get("title")
+                    description = sugg.get("description")
                     
-                    # If we still don't have suggestions, try to create them from the response
-                    if not suggestions and len(result) >= 1:
-                        # Convert numbered keys to suggestions
-                        for key in ["1", "2", 1, 2]:
-                            if key in result and isinstance(result[key], dict):
-                                item = result[key]
-                                if "title" not in item and "description" in item:
-                                    # Create a title from the first few words of description
-                                    description = item["description"]
-                                    title_words = description.split()[:3]
-                                    item["title"] = " ".join(title_words) + "..."
-                                suggestions.append(item)
+                    if title and description:
+                        # Make sure title doesn't match previous suggestions
+                        if title.lower() not in lower_previous:
+                            # Make sure suggestion has required fields
+                            valid_sugg = {
+                                "title": title,
+                                "description": description,
+                                "closer_percentage": 100,
+                                "timestamp": int(time.time())
+                            }
+                            valid_suggestions.append(valid_sugg)
+                            logger.info(f"Valid suggestion {i+1}: {title}")
+                        else:
+                            logger.info(f"Skipping duplicate suggestion: {title}")
                 
-                # If still no valid suggestions, use the fallback
-                if not suggestions:
-                    logger.warning("No valid fresh suggestions found in API response, using fallback")
-                    raise ValueError("No valid fresh suggestions found in API response")
+                suggestions = valid_suggestions
                 
-                # Ensure we have at least 2 suggestions
-                if len(suggestions) < 2:
-                    logger.warning(f"Only {len(suggestions)} fresh suggestions found, adding fallback suggestion")
-                    suggestions.append({
-                        "title": f"Build on your {self.goal_emotion} journey",
-                        "description": f"Continue to explore the emotional shift you've started, allowing it to deepen and evolve naturally toward {self.goal_emotion}.",
-                        "closer_percentage": slower_progress
-                    })
-                
-                # Ensure correct closer_percentage values
+                # If we have valid suggestions, return them
                 if len(suggestions) >= 2:
-                    suggestions[0]["closer_percentage"] = faster_progress
-                    suggestions[1]["closer_percentage"] = slower_progress
+                    # Ensure correct closer_percentage values
+                    suggestions[0]["closer_percentage"] = 100
+                    suggestions[1]["closer_percentage"] = 100
+                    
+                    logger.info(f"Successfully generated {len(suggestions)} fresh suggestions")
+                    titles = [s["title"] for s in suggestions]
+                    logger.info(f"Fresh suggestion titles: {titles}")
+                    
+                    # Cache these suggestions with a 5-minute lifetime
+                    emotion_cache.set(cache_key, suggestions)
+                    
+                    return suggestions
                 
-                logger.info(f"Generated {len(suggestions)} fresh suggestions")
-                return suggestions
+                # If we don't have enough valid suggestions, continue to fallbacks
+                logger.warning(f"Only found {len(suggestions)} valid suggestions, using enhanced fallbacks")
                 
             except json.JSONDecodeError as e:
-                logger.error(f"JSON parsing error in fresh suggestions: {e}, content: {content[:100]}...")
-                raise ValueError(f"Invalid JSON response for fresh suggestions: {e}")
-        
+                logger.error(f"JSON parsing error in fresh suggestions: {e}, content: {content[:300]}...")
+                # Continue to fallbacks
+            
+            logger.warning("Using fallback system for second step suggestions")
+            
         except Exception as e:
             logger.error(f"Error generating fresh suggestions: {e}")
-            # Return fallback suggestions that build on the chosen suggestion
-            
-            # Create contextually relevant fallbacks based on what was chosen
-            lower_chosen = chosen_suggestion.lower()
-            
-            if "reflect" in lower_chosen or "perspective" in lower_chosen:
-                suggestions = [
-                    {
-                        "title": f"Move from reflection to action",
-                        "description": f"Now that you've reflected, actively seek out small unexpected moments that might spark {self.goal_emotion} in your daily routine.",
-                        "closer_percentage": faster_progress
-                    },
-                    {
-                        "title": f"Deepen your emotional awareness",
-                        "description": f"Notice how your reflection has already started shifting your feelings, and gently cultivate the emerging sense of {self.goal_emotion}.",
-                        "closer_percentage": slower_progress
-                    }
-                ]
-            elif "embrac" in lower_chosen or "accept" in lower_chosen:
-                suggestions = [
-                    {
-                        "title": f"Channel acceptance into curiosity",
-                        "description": f"Transform your acceptance into active curiosity about what new experiences might bring {self.goal_emotion} into your emotional state.",
-                        "closer_percentage": faster_progress
-                    },
-                    {
-                        "title": f"From acceptance to appreciation",
-                        "description": f"Begin to appreciate the unexpected elements in your experience, finding value in the unpredictability that leads to {self.goal_emotion}.",
-                        "closer_percentage": slower_progress
-                    }
-                ]
-            else:
-                suggestions = [
-                    {
-                        "title": f"Amplify positive emotional shifts",
-                        "description": f"Notice any small shifts toward {self.goal_emotion} that have already begun and intentionally amplify these feelings through your attention.",
-                        "closer_percentage": faster_progress
-                    },
-                    {
-                        "title": f"Connect emotional dots",
-                        "description": f"Explore the connection between your current feelings and your past experiences of {self.goal_emotion}, building a bridge between them.",
-                        "closer_percentage": slower_progress
-                    }
-                ]
-            
-            logger.info(f"Using fallback fresh suggestions after chosen: {chosen_suggestion}")
-            return suggestions
+            # Continue to fallbacks
+        
+        # Use our enhanced fallback system built specifically for second steps
+        fallbacks = self._create_second_step_fallbacks(chosen_suggestion, self.current_emotion, self.goal_emotion)
+        logger.info(f"Using fallback fresh suggestions after chosen: {chosen_suggestion}")
+        return fallbacks
     
     def reset(self) -> None:
         """Reset all journey state."""
