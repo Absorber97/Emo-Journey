@@ -4,11 +4,13 @@ An emotional planner chat application built for SFBU's Structured Programming co
 
 ## Features
 
-- Real-time emotion classification from user messages
+- Real-time emotion classification from user messages using OpenAI's GPT-4o
 - Graph-based emotion transition planning using Dijkstra's algorithm
-- Intelligent suggestion generation to help navigate emotional changes
+- Intelligent suggestion generation with fixed progress percentages (50%, 75%, 100%)
 - Streamlit UI with emotion badges, goal selection, and reset functionality
-- Caching system to improve performance and reduce API calls
+- Robust fallback system when API responses fail
+- Comprehensive logging system for debugging and monitoring
+- In-memory caching system to improve performance and reduce API calls
 
 ## Project Structure
 
@@ -53,6 +55,17 @@ Start the Streamlit application:
 streamlit run src/main.py
 ```
 
+## How It Works
+
+1. **Initial Interaction**: When a user shares how they're feeling, the app classifies their emotion using the OpenAI API.
+2. **Goal Selection**: The user is presented with two positive goal emotions to work toward.
+3. **Guided Journey**: The app provides a structured 2-step emotional journey:
+   - First step: Two suggestions with 50% and 75% progress options
+   - Second step: Two additional suggestions to complete the remaining progress
+4. **Progress Tracking**: A progress bar visually tracks the user's journey toward their goal emotion.
+5. **Goal Achievement**: Upon reaching the goal emotion (100% progress), the chat is re-enabled and the user receives a congratulatory message.
+6. **Reset Option**: At any point, the user can reset the chat to start a fresh conversation.
+
 ## Data Structures & Algorithms
 
 EmoJourney demonstrates several key data structures and algorithms:
@@ -60,15 +73,23 @@ EmoJourney demonstrates several key data structures and algorithms:
 - **Graph**: Adjacency list representation of emotions and transitions
 - **Dijkstra's Algorithm**: For finding shortest paths between emotions
 - **Queue**: `collections.deque` for emotion history with max length
-- **Hash Table**: Dictionary-based cache for API responses
+- **Hash Table**: Dictionary-based cache for API responses with TTL expiration
 - **Priority Queue**: Heap-based priority queue for Dijkstra's algorithm
 
 ## Time and Space Complexity
 
-- Emotion graph with 8 emotions and ~24 edges
+- Emotion graph with 8 primary emotions and ~24 edges
 - Dijkstra's algorithm: O(E log V) time complexity
-- Memory usage: O(V + E) space complexity for graph
+- Memory usage: O(V + E) space complexity for graph representation
 - Cache: O(n) for n cached items with TTL-based expiration
+
+## Error Handling
+
+The application includes robust error handling:
+- Fallback suggestions when API calls fail
+- Cached responses to reduce API dependencies
+- Detailed logging for troubleshooting
+- Graceful UI state management
 
 ## Authors
 
