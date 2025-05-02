@@ -1,18 +1,18 @@
-# EmoJourney - Emotional Planner Chat
+# 🌈 EmoJourney - Emotional Planner Chat
 
 An emotional planner chat application built for SFBU's Structured Programming course that helps users transition between emotional states using graph-based planning and AI-powered suggestions.
 
-## Features
+## ✨ Features
 
-- Real-time emotion classification from user messages using OpenAI's GPT-4o
-- Graph-based emotion transition planning using Dijkstra's algorithm
-- Intelligent suggestion generation with fixed progress percentages (50%, 75%, 100%)
-- Streamlit UI with emotion badges, goal selection, and reset functionality
-- Robust fallback system when API responses fail
-- Comprehensive logging system for debugging and monitoring
-- In-memory caching system to improve performance and reduce API calls
+- 🤖 Real-time emotion classification from user messages using OpenAI's GPT-4o
+- 📊 Graph-based emotion transition planning using Dijkstra's algorithm
+- 💡 Intelligent suggestion generation with fixed progress percentages (50%, 75%, 100%)
+- 🖥️ Streamlit UI with emotion badges, goal selection, and reset functionality
+- 🛡️ Robust fallback system when API responses fail
+- 📝 Comprehensive logging system for debugging and monitoring
+- ⚡ In-memory caching system to improve performance and reduce API calls
 
-## Project Structure
+## 🗂️ Project Structure
 
 ```
 EmoJourney/
@@ -28,7 +28,7 @@ EmoJourney/
 └── README.md             # This file
 ```
 
-## Setup Instructions
+## 🚀 Setup Instructions
 
 1. Clone the repository
 2. Create a Python virtual environment:
@@ -47,7 +47,7 @@ EmoJourney/
    OPENAI_API_KEY=your_api_key_here
    ```
 
-## Running the Application
+## 🏃‍♀️ Running the Application
 
 Start the Streamlit application:
 
@@ -55,7 +55,7 @@ Start the Streamlit application:
 streamlit run src/main.py
 ```
 
-## How It Works
+## 🧩 How It Works
 
 1. **Initial Interaction**: When a user shares how they're feeling, the app classifies their emotion using the OpenAI API.
 2. **Goal Selection**: The user is presented with two positive goal emotions to work toward.
@@ -66,7 +66,7 @@ streamlit run src/main.py
 5. **Goal Achievement**: Upon reaching the goal emotion (100% progress), the chat is re-enabled and the user receives a congratulatory message.
 6. **Reset Option**: At any point, the user can reset the chat to start a fresh conversation.
 
-## Data Structures & Algorithms
+## 🧮 Data Structures & Algorithms
 
 EmoJourney demonstrates several key data structures and algorithms:
 
@@ -76,14 +76,14 @@ EmoJourney demonstrates several key data structures and algorithms:
 - **Hash Table**: Dictionary-based cache for API responses with TTL expiration
 - **Priority Queue**: Heap-based priority queue for Dijkstra's algorithm
 
-## Time and Space Complexity
+## ⏱️ Time and Space Complexity
 
 - Emotion graph with 8 primary emotions and ~24 edges
 - Dijkstra's algorithm: O(E log V) time complexity
 - Memory usage: O(V + E) space complexity for graph representation
 - Cache: O(n) for n cached items with TTL-based expiration
 
-## Error Handling
+## 🛠️ Error Handling
 
 The application includes robust error handling:
 - Fallback suggestions when API calls fail
@@ -91,6 +91,10 @@ The application includes robust error handling:
 - Detailed logging for troubleshooting
 - Graceful UI state management
 
-## Authors
+## 📋 Project Status
 
-SFBU Structured Programming Team 
+- **Core Functionality**: ✅ Complete
+- **UI Implementation**: ✅ Complete
+- **Error Handling**: ✅ Complete
+- **Performance Optimization**: ✅ Complete with caching
+- **Documentation**: ✅ Complete
