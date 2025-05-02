@@ -129,6 +129,11 @@ class UIStream:
             self._clean_old_suggestions()
             log_state("Cleaned previous suggestion blocks from message history")
             
+            # Ensure user context is passed to journey manager
+            if "user_context" in st.session_state and st.session_state.user_context:
+                self.journey_manager.user_context = st.session_state.user_context
+                log_state(f"Using context for suggestion generation: {st.session_state.user_context[:50]}...")
+            
             self.journey_manager.set_goal(selected_goal)
             st.session_state.goal_emotion = selected_goal
             st.session_state.show_goal_buttons = False
@@ -359,6 +364,11 @@ class UIStream:
                 # Ensure correct step tracking
                 progress['current_step'] = 2
                 
+                # Ensure user context is still available to journey manager
+                if "user_context" in st.session_state and st.session_state.user_context:
+                    self.journey_manager.user_context = st.session_state.user_context
+                    log_state(f"Using context for second step suggestions: {st.session_state.user_context[:50]}...")
+                
                 # Provide context based on what the user has chosen
                 context = self._build_suggestion_context()
                 
@@ -423,6 +433,9 @@ class UIStream:
                 
                 # Reset goal but keep current emotion
                 self.journey_manager.reset_goal()
+                
+                # Keep context for next journey
+                self.journey_manager.user_context = st.session_state.user_context
     
     def _build_suggestion_context(self):
         """Build context string based on user's emotional journey so far."""
@@ -605,6 +618,10 @@ class UIStream:
                 
                 # Update session state
                 st.session_state.current_emotion = emotion
+                
+                # Save the user message context for use in suggestions
+                if "user_context" not in st.session_state:
+                    st.session_state.user_context = message
                 
                 # Format the emotion badge
                 emotion_badge = self.format_emotion(emotion, emoji, color)

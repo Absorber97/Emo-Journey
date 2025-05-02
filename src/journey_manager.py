@@ -37,6 +37,8 @@ class JourneyManager:
         self.current_emotion: Optional[str] = None
         self.goal_emotion: Optional[str] = None
         self.path: List[str] = []
+        self.user_context: Optional[str] = None  # Store the user's original message
+        self.context_history: List[Dict[str, Any]] = []  # Store context with emotions
     
     def classify_user_message(self, message: str) -> Dict[str, Any]:
         """
@@ -48,6 +50,9 @@ class JourneyManager:
         Returns:
             Dictionary with emotion data
         """
+        # Store the user's original message for context
+        self.user_context = message
+        
         # Check cache first
         cache_key = f"emotion:{message[:100]}"  # Use first 100 chars as key
         cached_result = emotion_cache.get(cache_key)
@@ -64,6 +69,13 @@ class JourneyManager:
         # Update state
         self.current_emotion = emotion
         self.history.append(emotion)
+        
+        # Add to context history
+        self.context_history.append({
+            "emotion": emotion,
+            "message": message,
+            "timestamp": int(time.time())
+        })
         
         # Check if goal has been reached
         goal_reached = self.check_goal_reached()
@@ -156,7 +168,7 @@ class JourneyManager:
         if not self.current_emotion or not self.goal_emotion:
             return {"progress": 0, "steps_remaining": 0, "total_steps": 2, "current_step": 0}
         
-        # Fixed 2-step journey regardless of actual path length
+        # Fixed 2-step journey regardless of actual path length - enforce minimum of 2 steps
         total_steps = 2
         
         # Default values for beginning journey
@@ -219,17 +231,21 @@ class JourneyManager:
         # Get current progress data
         progress = self.get_progress()
         
-        # Check if we can use cached suggestions for this transition stage
-        cache_key = f"suggestion:{self.current_emotion}:{self.goal_emotion}:{progress['current_step']}:{int(time.time()/300)}"
+        # Add timestamp for variety and invalidate cache when the context changes
+        context_key = f"{self.user_context or 'no_context'}"[:50]  # First 50 chars of context for the key
+        cache_key = f"suggestion:{self.current_emotion}:{self.goal_emotion}:{progress['current_step']}:{context_key}:{int(time.time()/300)}"
         cached_suggestions = emotion_cache.get(cache_key)
         
         if cached_suggestions:
             logger.info(f"Using cached suggestions for {self.current_emotion} -> {self.goal_emotion}")
             return cached_suggestions
         
-        # Get context from emotion history
+        # Get context from emotion history and user's message
         emotion_history = list(self.history)
         emotion_context = ", ".join(emotion_history[-3:]) if emotion_history else self.current_emotion
+        
+        # Extract user context (safely handle None case)
+        user_context = self.user_context or "unspecified situation"
         
         # Define fixed percentages based on current step
         current_step = progress["current_step"]
@@ -278,6 +294,8 @@ class JourneyManager:
         You are an emotional coach guiding someone from their current emotion ({self.current_emotion}) 
         to their goal emotion ({self.goal_emotion}).
         
+        SPECIFIC CONTEXT: The user has expressed: "{user_context}"
+        
         The user is currently at step {progress['current_step']} of a 2-step journey.
         Their recent emotional state has been: {emotion_context}
         
@@ -286,8 +304,9 @@ class JourneyManager:
         
         IMPORTANT: 
         {step_instructions}
+        - Your suggestions MUST be directly relevant to their specific situation: "{user_context}"
         - Focus on how they can internally shift their emotional state, not just external activities
-        - Suggest emotional perspectives, reflections, or mindset shifts
+        - Suggest emotional perspectives, reflections, or mindset shifts that address their specific feelings about being tired and ignored by their crush
         - Both suggestions should aim to help the person move toward feeling {self.goal_emotion}
         - Think about the emotional journey rather than just activities to do
         - Adapt the style, tone, and imagery to match the target emotion ({self.goal_emotion})
@@ -314,7 +333,7 @@ class JourneyManager:
         
         try:
             # Call OpenAI API for suggestions
-            logger.info(f"Generating suggestions for {self.current_emotion} -> {self.goal_emotion}")
+            logger.info(f"Generating suggestions for {self.current_emotion} -> {self.goal_emotion} with context: {user_context[:50]}...")
             client = openai.OpenAI(api_key=self.emotion_api.api_key)
             response = client.chat.completions.create(
                 model=model,
@@ -326,16 +345,18 @@ class JourneyManager:
             )
             
             # Parse and process the response
-            content = response.choices[0].message.content
+            content = response.choices[0].message.content if response and response.choices and len(response.choices) > 0 and response.choices[0].message else None
+            if content:
+                logger.info(f"Raw API response: {content[:200]}...")  # Log first 200 chars for debugging
+            else:
+                logger.warning("Empty or invalid response from OpenAI API")
+            
             if not content:
                 logger.warning("Empty response from OpenAI API")
                 raise ValueError("Empty response from OpenAI API")
             
             # Try to parse the JSON response with improved error handling
             try:
-                # Log the first part of the response for debugging
-                logger.info(f"API response sample: {content[:200]}...")
-                
                 # Initialize suggestions as empty list
                 suggestions = []
                 
@@ -486,7 +507,91 @@ class JourneyManager:
     
     def _create_first_step_fallbacks(self, current_emotion, goal_emotion):
         """Create context-aware first step fallbacks based on the emotion transition"""
-        # Organize fallbacks by emotion transition categories
+        # Extract user context (safely handle None case)
+        user_context = self.user_context or "unspecified situation"
+        
+        # If we have a context about being ignored by a crush, provide relevant fallbacks
+        if "crush" in user_context.lower() or "ignore" in user_context.lower():
+            if goal_emotion == "surprise":
+                return [
+                    {
+                        "title": "Reimagine social connections",
+                        "description": "Look for unexpected connections with other people who might value your presence more than your crush does currently.",
+                        "closer_percentage": 50,
+                        "timestamp": int(time.time())
+                    },
+                    {
+                        "title": "Explore unnoticed potential",
+                        "description": "Consider the possibility that being ignored by your crush might lead to surprising new opportunities and meaningful connections.",
+                        "closer_percentage": 75,
+                        "timestamp": int(time.time())
+                    }
+                ]
+            elif goal_emotion == "joy":
+                return [
+                    {
+                        "title": "Expand relationship perspective",
+                        "description": "Shift focus from feeling ignored to appreciating other relationships in your life that bring value and joy.",
+                        "closer_percentage": 50,
+                        "timestamp": int(time.time())
+                    },
+                    {
+                        "title": "Self-affirmation practice",
+                        "description": "Recognize your inherent worth independent of your crush's attention, opening space for joy to emerge.",
+                        "closer_percentage": 75,
+                        "timestamp": int(time.time())
+                    }
+                ]
+            elif goal_emotion == "trust":
+                return [
+                    {
+                        "title": "Inner confidence building",
+                        "description": "Begin developing trust in your own worth, separate from validation from your crush or anyone else.",
+                        "closer_percentage": 50,
+                        "timestamp": int(time.time())
+                    },
+                    {
+                        "title": "Reliable connections focus",
+                        "description": "Identify and appreciate the people in your life who have consistently shown up for you, unlike your crush.",
+                        "closer_percentage": 75,
+                        "timestamp": int(time.time())
+                    }
+                ]
+        
+        # If we have a context about feeling tired, provide relevant fallbacks
+        if "tired" in user_context.lower() or "exhaust" in user_context.lower():
+            if goal_emotion == "surprise":
+                return [
+                    {
+                        "title": "Energy curiosity practice",
+                        "description": "Explore what might energize you in unexpected ways, outside your normal patterns and routines.",
+                        "closer_percentage": 50,
+                        "timestamp": int(time.time())
+                    },
+                    {
+                        "title": "Micro-adventure mindset",
+                        "description": "Introduce tiny moments of novelty in your daily routine to spark energy and surprise despite feeling tired.",
+                        "closer_percentage": 75,
+                        "timestamp": int(time.time())
+                    }
+                ]
+            elif goal_emotion == "joy":
+                return [
+                    {
+                        "title": "Restful pleasure moments",
+                        "description": "Find small joys that don't require energy but still bring genuine pleasure and contentment.",
+                        "closer_percentage": 50,
+                        "timestamp": int(time.time())
+                    },
+                    {
+                        "title": "Energy preservation focus",
+                        "description": "Channel your limited energy into the specific activities that bring you the most joy and fulfillment.",
+                        "closer_percentage": 75,
+                        "timestamp": int(time.time())
+                    }
+                ]
+            
+        # Organize fallbacks by emotion transition categories if no specific context matches
         emotion_fallbacks = {
             # Transitions to joy
             "joy": [
@@ -568,8 +673,92 @@ class JourneyManager:
         if goal_emotion is None:
             goal_emotion = "positive emotion"  # Safe fallback
         
+        # Extract user context (safely handle None case)
+        user_context = self.user_context or "unspecified situation"
+        
         # Clean up the first choice title to extract key concepts
         first_choice_lower = first_choice.lower()
+        
+        # Special fallbacks for the crush/being ignored context
+        if "crush" in user_context.lower() or "ignore" in user_context.lower():
+            if goal_emotion == "surprise":
+                return [
+                    {
+                        "title": "Unexpected self-discovery",
+                        "description": f"Transform your feelings about being ignored into surprise at discovering new aspects of yourself you hadn't noticed before.",
+                        "closer_percentage": 100,
+                        "timestamp": int(time.time())
+                    },
+                    {
+                        "title": "Welcome unpredictable connections",
+                        "description": f"Fully embrace the surprising new connections that can emerge when you let go of attachment to your crush's attention.",
+                        "closer_percentage": 100,
+                        "timestamp": int(time.time())
+                    }
+                ]
+            elif goal_emotion == "anticipation":
+                return [
+                    {
+                        "title": "Future romantic potential",
+                        "description": f"Shift your emotional energy toward excitement about future relationship possibilities that better match your worth.",
+                        "closer_percentage": 100,
+                        "timestamp": int(time.time())
+                    },
+                    {
+                        "title": "New connections horizon",
+                        "description": f"Open yourself to anticipation of meaningful connections with people who will truly appreciate your presence.",
+                        "closer_percentage": 100,
+                        "timestamp": int(time.time())
+                    }
+                ]
+            elif goal_emotion == "joy":
+                return [
+                    {
+                        "title": "Self-appreciation liberation",
+                        "description": f"Find authentic joy in being fully yourself, independent of whether your crush notices or appreciates you.",
+                        "closer_percentage": 100,
+                        "timestamp": int(time.time())
+                    },
+                    {
+                        "title": "Freedom in authenticity",
+                        "description": f"Experience the liberating joy that comes from no longer seeking validation from someone who isn't giving it freely.",
+                        "closer_percentage": 100,
+                        "timestamp": int(time.time())
+                    }
+                ]
+        
+        # Special fallbacks for the tiredness context
+        if "tired" in user_context.lower() or "exhaust" in user_context.lower():
+            if goal_emotion == "surprise":
+                return [
+                    {
+                        "title": "Energy from unexpected sources",
+                        "description": f"Discover surprising sources of energy and renewal that you hadn't considered while feeling depleted.",
+                        "closer_percentage": 100,
+                        "timestamp": int(time.time())
+                    },
+                    {
+                        "title": "Transformation through rest",
+                        "description": f"Experience how proper rest can surprisingly transform your outlook and emotional state entirely.",
+                        "closer_percentage": 100,
+                        "timestamp": int(time.time())
+                    }
+                ]
+            elif goal_emotion == "joy":
+                return [
+                    {
+                        "title": "Joyful surrender",
+                        "description": f"Find deep joy in allowing yourself to fully accept and work with your current energy levels rather than fighting them.",
+                        "closer_percentage": 100,
+                        "timestamp": int(time.time())
+                    },
+                    {
+                        "title": "Effortless happiness",
+                        "description": f"Discover the joy available in low-energy states through mindful presence and gentle self-compassion.",
+                        "closer_percentage": 100,
+                        "timestamp": int(time.time())
+                    }
+                ]
         
         # Default second steps for different first choice themes
         if "gratitude" in first_choice_lower or "appreciate" in first_choice_lower:
@@ -719,8 +908,12 @@ class JourneyManager:
         lower_previous = [s.lower() for s in previous_suggestions]
         logger.info(f"Avoiding duplicate suggestions: {previous_suggestions}")
         
+        # Extract user context (safely handle None case)
+        user_context = self.user_context or "unspecified situation"
+        context_key = f"{user_context}"[:50]  # First 50 chars of context for the key
+        
         # Add current timestamp to cache key for variety over time
-        cache_key = f"fresh_suggestion:{self.current_emotion}:{self.goal_emotion}:{chosen_suggestion}:{int(time.time()/300)}"
+        cache_key = f"fresh_suggestion:{self.current_emotion}:{self.goal_emotion}:{chosen_suggestion}:{context_key}:{int(time.time()/300)}"
         cached_suggestions = emotion_cache.get(cache_key)
         
         if cached_suggestions:
@@ -728,11 +921,13 @@ class JourneyManager:
             return cached_suggestions
         
         # Update context with current progress and chosen suggestion
-        full_context = f"Starting from {self.current_emotion}, the user is working towards {self.goal_emotion}. They just chose the suggestion '{chosen_suggestion}' which brought them {progress.get('progress', 0)}% toward their goal. Now you need to provide the final step suggestions to complete their journey."
+        full_context = f"Starting from {self.current_emotion} (feeling: '{user_context}'), the user is working towards {self.goal_emotion}. They just chose the suggestion '{chosen_suggestion}' which brought them {progress.get('progress', 0)}% toward their goal. Now you need to provide the final step suggestions to complete their journey."
         
         # Create a more explicit system prompt for final suggestion generation
         system_prompt = f"""
         You are an emotional coach guiding someone on their journey from {self.current_emotion} to {self.goal_emotion}.
+        
+        USER'S SPECIFIC SITUATION: "{user_context}"
         
         CONTEXT: {full_context}
         
@@ -748,6 +943,8 @@ class JourneyManager:
         4. Complete their journey to reach {self.goal_emotion} fully
         5. NOT repeat any titles or themes from previous suggestions
         6. Have different approaches from each other (two distinct paths to the same goal)
+        7. Be DIRECTLY RELEVANT to their specific situation about feeling tired and ignored by their crush
+        8. Address the emotional needs revealed in "{user_context}"
         
         Both suggestions should bring the user to 100% completion, but through different emotional approaches.
         
@@ -768,7 +965,7 @@ class JourneyManager:
         
         try:
             # Call OpenAI API for fresh suggestions
-            logger.info(f"Generating fresh suggestions after user chose: {chosen_suggestion}")
+            logger.info(f"Generating fresh suggestions after user chose: {chosen_suggestion} with context: {user_context[:50]}...")
             client = openai.OpenAI(api_key=self.emotion_api.api_key)
             response = client.chat.completions.create(
                 model="gpt-4o",
@@ -780,8 +977,11 @@ class JourneyManager:
             )
             
             # Get the raw response to debug
-            content = response.choices[0].message.content
-            logger.info(f"Raw API response: {content[:200]}...")  # Log first 200 chars for debugging
+            content = response.choices[0].message.content if response and response.choices and len(response.choices) > 0 and response.choices[0].message else None
+            if content:
+                logger.info(f"Raw API response: {content[:200]}...")  # Log first 200 chars for debugging
+            else:
+                logger.warning("Empty or invalid response from OpenAI API")
             
             if not content:
                 logger.warning("Empty response from OpenAI API")
@@ -902,8 +1102,15 @@ class JourneyManager:
         return fallbacks
     
     def reset(self) -> None:
-        """Reset all journey state."""
+        """Reset all journey state but preserve user context."""
+        # Keep a copy of the user context
+        user_context = self.user_context
+        
+        # Clear journey state
         self.history.clear()
         self.current_emotion = None
         self.goal_emotion = None
-        self.path = [] 
+        self.path = []
+        
+        # Preserve the user context
+        self.user_context = user_context 
