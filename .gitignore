@@ -82,3 +82,5 @@ __pycache__/
 **/.DS_Store
 **/.env
 .streamlit/config.toml
+HW Requirements.md
+Project Idea.md
